@@ -87,7 +87,16 @@ async function syncReactionCounts(reaction: MessageReaction | PartialMessageReac
     }
   }
 
-  const messageId = reaction.message.id;
+  const message = reaction.message;
+  if (message.partial) {
+    try {
+      await message.fetch();
+    } catch {
+      return;
+    }
+  }
+
+  const messageId = message.id;
   const idea = ctx.db.prepare('SELECT * FROM ideas WHERE message_id = ?').get(messageId) as IdeaRow | undefined;
   if (!idea) return;
 
@@ -100,6 +109,15 @@ async function syncReactionCounts(reaction: MessageReaction | PartialMessageReac
     ctx.db.prepare('UPDATE ideas SET upvotes = ? WHERE id = ?').run(count, idea.id);
   } else {
     ctx.db.prepare('UPDATE ideas SET downvotes = ? WHERE id = ?').run(count, idea.id);
+  }
+
+  // Update the embed on the message
+  try {
+    const updatedIdea = ctx.db.prepare('SELECT * FROM ideas WHERE id = ?').get(idea.id) as IdeaRow;
+    const embed = buildIdeaEmbed(updatedIdea);
+    await message.edit({ embeds: [embed] });
+  } catch (err) {
+    ctx.logger.warn(`Could not update idea embed #${idea.id}: ${err}`);
   }
 
   ctx.logger.debug(`Updated votes for idea #${idea.id}: ${emoji} = ${count}`);

@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Events } from 'discord.js';
+import { Client, GatewayIntentBits, Events, Partials } from 'discord.js';
 import cron from 'node-cron';
 import { config } from './config';
 import { initDatabase } from './db';
@@ -27,6 +27,11 @@ async function main(): Promise<void> {
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.GuildMessageReactions,
       GatewayIntentBits.MessageContent,
+    ],
+    partials: [
+      Partials.Message,
+      Partials.Reaction,
+      Partials.User,
     ],
   });
 
