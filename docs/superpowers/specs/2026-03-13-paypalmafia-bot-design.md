@@ -213,7 +213,7 @@ Express embutido rodando na mesma porta (default 3000).
 
 ```
 POST /webhooks/github   — validação HMAC SHA-256
-POST /webhooks/linear   — validação via IP ou token
+POST /webhooks/linear   — validação HMAC via LINEAR_WEBHOOK_SECRET
 GET  /health            — health check
 ```
 
@@ -223,12 +223,25 @@ GET  /health            — health check
 DISCORD_TOKEN=
 DISCORD_CLIENT_ID=
 DISCORD_GUILD_ID=
+GITHUB_TOKEN=              # PAT para GitHub API (leitura de commits, PRs, issues)
 GITHUB_WEBHOOK_SECRET=
 LINEAR_API_KEY=
 LINEAR_WEBHOOK_SECRET=
 WEBHOOK_PORT=3000
 DATABASE_PATH=./data/bot.db
 ```
+
+## Permissões
+
+MVP: todos os comandos disponíveis para todos os membros do servidor. Sem restrição de role — são 2 co-founders. Role-based guards ficam para quando/se o servidor crescer.
+
+## Convenções
+
+- `projects.github_repo` armazena no formato `owner/repo` (ex: `paypalmafia/app`).
+- Webhook routing: match por `repository.full_name` (GitHub) e `teamId` (Linear) contra os campos do projeto.
+- Módulos que dependem de outros (Standup depende de GitHub e Linear) usam `getModule()` e toleram dependência indisponível (log warning, skip gracefully).
+- Erros de API externa (rate limit, timeout): log + skip, sem retry para MVP.
+- Canal `standup` é criado automaticamente por projeto junto com `general`, `dev`, `links`.
 
 ## Ordem de Implementação (MVP)
 
