@@ -88,7 +88,7 @@ export function initAI(): boolean {
   return true;
 }
 
-// Fetch context from GitHub: repo structure, recent commits, open issues, relevant code
+// Fetch context from GitHub: full tree, relevant files content, commits, issues
 async function fetchGitHubContext(githubRepo: string, title: string): Promise<string> {
   const token = process.env['GITHUB_TOKEN'];
   if (!token || !githubRepo) return '';
@@ -98,120 +98,128 @@ async function fetchGitHubContext(githubRepo: string, title: string): Promise<st
     Accept: 'application/vnd.github.v3+json',
   };
 
+  const ghUrl = (path: string) => `https://github.com/${githubRepo}/blob/main/${path}`;
   const parts: string[] = [];
+
+  // Helper to fetch file content from GitHub
+  async function fetchFileContent(path: string, maxLines = 80): Promise<string | null> {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${githubRepo}/contents/${path}`, { headers });
+      if (!res.ok) return null;
+      const data = await res.json() as any;
+      if (!data.content || data.encoding !== 'base64') return null;
+      const content = Buffer.from(data.content, 'base64').toString('utf-8');
+      return content.split('\n').slice(0, maxLines).join('\n');
+    } catch {
+      return null;
+    }
+  }
 
   try {
     // 1. Repo info
     const repoRes = await fetch(`https://api.github.com/repos/${githubRepo}`, { headers });
     if (repoRes.ok) {
       const repo = await repoRes.json() as any;
-      parts.push(`### Repositório: ${repo.full_name}`);
+      parts.push(`### Repositório: [${repo.full_name}](https://github.com/${githubRepo})`);
       parts.push(`- Descrição: ${repo.description || 'N/A'}`);
-      parts.push(`- Linguagem principal: ${repo.language || 'N/A'}`);
-      parts.push(`- Stars: ${repo.stargazers_count} | Forks: ${repo.forks_count}`);
+      parts.push(`- Stack: ${repo.language || 'N/A'}`);
     }
 
-    // 2. Recent commits (last 5)
-    const commitsRes = await fetch(`https://api.github.com/repos/${githubRepo}/commits?per_page=5`, { headers });
+    // 2. Full file tree — this is the KEY for context
+    const treeRes = await fetch(`https://api.github.com/repos/${githubRepo}/git/trees/main?recursive=1`, { headers });
+    let allFiles: string[] = [];
+    if (treeRes.ok) {
+      const tree = await treeRes.json() as any;
+      allFiles = (tree.tree || [])
+        .filter((f: any) => f.type === 'blob')
+        .map((f: any) => f.path);
+
+      // Show project structure (src/ only for brevity)
+      const srcFiles = allFiles.filter(f => f.startsWith('src/'));
+      parts.push(`\n### Estrutura do Projeto (${srcFiles.length} arquivos em src/)`);
+      parts.push('```');
+      for (const f of srcFiles) {
+        parts.push(f);
+      }
+      parts.push('```');
+    }
+
+    // 3. Smart file matching — find files related to the issue title
+    const keywords = title
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(w => w.length > 2)
+      .flatMap(w => {
+        // Generate related terms
+        const related: string[] = [w];
+        if (w === 'autenticação' || w === 'login' || w === 'oauth' || w === 'google') {
+          related.push('auth', 'login', 'session', 'middleware', 'magic', 'token', 'sign');
+        }
+        if (w === 'dark' || w === 'mode' || w === 'tema' || w === 'theme') {
+          related.push('theme', 'dark', 'light', 'globals.css', 'tailwind');
+        }
+        if (w === 'notificação' || w === 'notificações' || w === 'push' || w === 'notification') {
+          related.push('push', 'notification', 'subscribe', 'service-worker', 'manifest');
+        }
+        return related;
+      });
+
+    const relevantFiles = allFiles.filter(f => {
+      const lower = f.toLowerCase();
+      return keywords.some(k => lower.includes(k));
+    }).slice(0, 10); // Max 10 files
+
+    if (relevantFiles.length > 0) {
+      parts.push(`\n### Arquivos Relevantes para "${title}" (${relevantFiles.length} encontrados)`);
+
+      // Fetch content of relevant files in parallel
+      const contentPromises = relevantFiles.map(async (path) => {
+        const content = await fetchFileContent(path);
+        if (content) {
+          return `\n#### [\`${path}\`](${ghUrl(path)})\n\`\`\`\n${content}\n\`\`\``;
+        }
+        return `\n- [\`${path}\`](${ghUrl(path)}) *(não foi possível ler)*`;
+      });
+
+      const contents = await Promise.all(contentPromises);
+      parts.push(...contents);
+    }
+
+    // 4. Key config files (always include)
+    const keyFiles = ['package.json'];
+    for (const keyFile of keyFiles) {
+      const content = await fetchFileContent(keyFile);
+      if (content) {
+        parts.push(`\n### [\`${keyFile}\`](${ghUrl(keyFile)})`);
+        parts.push(`\`\`\`json\n${content}\n\`\`\``);
+      }
+    }
+
+    // 5. Recent commits (last 10)
+    const commitsRes = await fetch(`https://api.github.com/repos/${githubRepo}/commits?per_page=10`, { headers });
     if (commitsRes.ok) {
       const commits = await commitsRes.json() as any[];
       if (commits.length > 0) {
         parts.push('\n### Commits Recentes');
         for (const c of commits) {
-          parts.push(`- \`${c.sha.slice(0, 7)}\` ${c.commit.message.split('\n')[0]} (${c.commit.author.name})`);
+          parts.push(`- [\`${c.sha.slice(0, 7)}\`](https://github.com/${githubRepo}/commit/${c.sha}) ${c.commit.message.split('\n')[0]}`);
         }
       }
     }
 
-    // 3. Open issues (last 5)
+    // 6. Open issues/PRs
     const issuesRes = await fetch(`https://api.github.com/repos/${githubRepo}/issues?state=open&per_page=5`, { headers });
     if (issuesRes.ok) {
       const issues = await issuesRes.json() as any[];
       if (issues.length > 0) {
-        parts.push('\n### Issues Abertas no GitHub');
+        parts.push('\n### Issues/PRs Abertas');
         for (const i of issues) {
-          parts.push(`- #${i.number}: ${i.title} [${i.labels.map((l: any) => l.name).join(', ') || 'sem label'}]`);
+          parts.push(`- [#${i.number}: ${i.title}](${i.html_url})`);
         }
       }
     }
 
-    // 4. Search code for relevant files AND fetch their content
-    const searchTerms = title.split(/\s+/).filter(w => w.length > 3).slice(0, 3).join('+');
-    if (searchTerms) {
-      const searchRes = await fetch(
-        `https://api.github.com/search/code?q=${encodeURIComponent(searchTerms)}+repo:${githubRepo}&per_page=5`,
-        { headers }
-      );
-      if (searchRes.ok) {
-        const search = await searchRes.json() as any;
-        if (search.items && search.items.length > 0) {
-          parts.push('\n### Arquivos Relevantes no Codebase');
-          for (const item of search.items) {
-            parts.push(`- [\`${item.path}\`](https://github.com/${githubRepo}/blob/main/${item.path})`);
-            // Fetch file content (first 100 lines) for context
-            try {
-              const fileRes = await fetch(
-                `https://api.github.com/repos/${githubRepo}/contents/${item.path}`,
-                { headers }
-              );
-              if (fileRes.ok) {
-                const fileData = await fileRes.json() as any;
-                if (fileData.content && fileData.encoding === 'base64') {
-                  const content = Buffer.from(fileData.content, 'base64').toString('utf-8');
-                  const preview = content.split('\n').slice(0, 50).join('\n');
-                  parts.push(`\`\`\`\n${preview}\n\`\`\``);
-                }
-              }
-            } catch {
-              // Skip file content on error
-            }
-          }
-        }
-      }
-    }
-
-    // 4b. Also fetch key config files for project understanding
-    const keyFiles = ['package.json', 'next.config.ts', 'next.config.js', 'tsconfig.json'];
-    for (const keyFile of keyFiles) {
-      try {
-        const fileRes = await fetch(
-          `https://api.github.com/repos/${githubRepo}/contents/${keyFile}`,
-          { headers }
-        );
-        if (fileRes.ok) {
-          const fileData = await fileRes.json() as any;
-          if (fileData.content && fileData.encoding === 'base64') {
-            const content = Buffer.from(fileData.content, 'base64').toString('utf-8');
-            parts.push(`\n### Conteúdo de \`${keyFile}\` ([ver no GitHub](https://github.com/${githubRepo}/blob/main/${keyFile}))`);
-            parts.push(`\`\`\`json\n${content.slice(0, 1500)}\n\`\`\``);
-          }
-        }
-      } catch {
-        // Skip
-      }
-    }
-
-    // 5. Repo file tree (top-level)
-    const treeRes = await fetch(`https://api.github.com/repos/${githubRepo}/contents/`, { headers });
-    if (treeRes.ok) {
-      const tree = await treeRes.json() as any[];
-      if (tree.length > 0) {
-        parts.push('\n### Estrutura do Projeto (raiz)');
-        parts.push(tree.map((f: any) => `- ${f.type === 'dir' ? '📁' : '📄'} ${f.name}`).join('\n'));
-      }
-    }
-
-    // 6. Open PRs
-    const prsRes = await fetch(`https://api.github.com/repos/${githubRepo}/pulls?state=open&per_page=3`, { headers });
-    if (prsRes.ok) {
-      const prs = await prsRes.json() as any[];
-      if (prs.length > 0) {
-        parts.push('\n### PRs Abertos');
-        for (const pr of prs) {
-          parts.push(`- #${pr.number}: ${pr.title} (${pr.user.login}) [${pr.head.ref} → ${pr.base.ref}]`);
-        }
-      }
-    }
+    // (tree and PRs already covered above)
   } catch (err) {
     logger.warn('GitHub context fetch error:', err);
   }
