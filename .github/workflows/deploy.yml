@@ -43,8 +43,8 @@ jobs:
           script: |
             cd ~/paypalmafia-bot
             git pull origin main
-            npm ci --production
-            npm run build
+            npm ci
+            npx tsc
             pm2 restart paypalmafia-bot
 
       - name: Get version from package.json
