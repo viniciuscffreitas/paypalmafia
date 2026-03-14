@@ -11,6 +11,7 @@ import { pollsModule } from './modules/polls';
 import { decisionsModule } from './modules/decisions';
 import { focusModule } from './modules/focus';
 import { autoBookmarkModule } from './modules/auto-bookmark';
+import { deployModule } from './modules/deploy';
 
 const modules = [
   projectsModule,
@@ -24,6 +25,7 @@ const modules = [
   decisionsModule,
   focusModule,
   autoBookmarkModule,
+  deployModule,
 ];
 
 registerCommands(
