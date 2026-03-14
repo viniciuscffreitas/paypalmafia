@@ -6,6 +6,7 @@ import { ModuleLoader } from './core/module-loader';
 import { registerCommands } from './core/command-registry';
 import { createWebhookServer } from './server';
 import { createLogger } from './core/logger';
+import { initAI } from './core/ai';
 import { projectsModule } from './modules/projects';
 import { linksModule } from './modules/links';
 import { githubModule } from './modules/github';
@@ -36,6 +37,7 @@ async function main(): Promise<void> {
   });
 
   const db = initDatabase(config.database.path);
+  initAI();
   const loader = new ModuleLoader(client, db);
 
   const modules = [

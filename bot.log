@@ -1,0 +1,33 @@
+[2026-03-13T23:24:56.429Z] [INFO] [db] Database initialized at ./data/bot.db
+[2026-03-13T23:24:56.434Z] [INFO] [projects] Projects module loaded
+[2026-03-13T23:24:56.434Z] [INFO] [module-loader] Module loaded: projects
+[2026-03-13T23:24:56.434Z] [INFO] [links] Links module loaded
+[2026-03-13T23:24:56.434Z] [INFO] [module-loader] Module loaded: links
+[2026-03-13T23:24:56.435Z] [INFO] [github] GitHub module loaded
+[2026-03-13T23:24:56.435Z] [INFO] [module-loader] Module loaded: github
+[2026-03-13T23:24:56.435Z] [WARN] [linear] LINEAR_API_KEY not set — Linear features disabled
+[2026-03-13T23:24:56.435Z] [INFO] [linear] Linear module loaded
+[2026-03-13T23:24:56.435Z] [INFO] [module-loader] Module loaded: linear
+[2026-03-13T23:24:56.435Z] [INFO] [standup] Standup module loaded
+[2026-03-13T23:24:56.435Z] [INFO] [module-loader] Module loaded: standup
+[2026-03-13T23:24:56.435Z] [INFO] [pulse] Pulse module loaded
+[2026-03-13T23:24:56.435Z] [INFO] [module-loader] Module loaded: pulse
+[2026-03-13T23:24:56.435Z] [INFO] [ideas] Ideas module loaded
+[2026-03-13T23:24:56.435Z] [INFO] [module-loader] Module loaded: ideas
+[2026-03-13T23:24:56.435Z] [INFO] [polls] Polls module loaded
+[2026-03-13T23:24:56.435Z] [INFO] [module-loader] Module loaded: polls
+[2026-03-13T23:24:56.435Z] [INFO] [decisions] Decisions module loaded
+[2026-03-13T23:24:56.435Z] [INFO] [module-loader] Module loaded: decisions
+[2026-03-13T23:24:56.435Z] [INFO] [focus] Focus module loaded
+[2026-03-13T23:24:56.435Z] [INFO] [module-loader] Module loaded: focus
+[2026-03-13T23:24:56.435Z] [INFO] [auto-bookmark] Auto-bookmark module loaded
+[2026-03-13T23:24:56.435Z] [INFO] [module-loader] Module loaded: auto-bookmark
+[2026-03-13T23:24:57.184Z] [INFO] [bot] Bot online como Paypal Mafia bot#3461
+[2026-03-13T23:24:57.449Z] [INFO] [command-registry] Registered 11 guild commands
+[2026-03-13T23:24:57.449Z] [INFO] [server] Webhook routes registered: /webhooks/github
+[2026-03-13T23:24:57.449Z] [INFO] [server] Webhook routes registered: /webhooks/linear
+[2026-03-13T23:24:57.455Z] [INFO] [bot] Cron job registered: daily-standup (0 12 * * 1-5)
+[2026-03-13T23:24:57.456Z] [INFO] [bot] Cron job registered: weekly-digest (0 12 * * 1)
+[2026-03-13T23:24:57.456Z] [INFO] [bot] Cron job registered: inactivity-check (0 15 * * *)
+[2026-03-13T23:24:57.457Z] [INFO] [bot] Cron job registered: focus-check (* * * * *)
+[2026-03-13T23:24:57.457Z] [INFO] [server] Webhook server listening on port 3456

@@ -7,6 +7,7 @@ import {
 import { Router, type Request, type Response } from 'express';
 import { LinearClient } from '@linear/sdk';
 import type { BotModule, ModuleContext } from '../../types';
+import { generateIssueDescription } from '../../core/ai';
 
 let ctx: ModuleContext;
 let linearClient: LinearClient | null = null;
@@ -106,7 +107,7 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply();
 
   const title = interaction.options.getString('title', true);
-  const description = interaction.options.getString('description');
+  const manualDescription = interaction.options.getString('description');
 
   try {
     const teams = await linearClient.teams({ filter: { key: { eq: project.linear_team_id } } });
@@ -116,10 +117,20 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
       return;
     }
 
+    // Generate AI description if no manual description provided
+    let description = manualDescription || undefined;
+    if (!manualDescription) {
+      await interaction.editReply('🤖 Gerando descrição com AI...');
+      const aiDesc = await generateIssueDescription(title, project.name);
+      if (aiDesc) {
+        description = aiDesc;
+      }
+    }
+
     const issue = await linearClient.createIssue({
       teamId: team.id,
       title,
-      description: description || undefined,
+      description,
     });
 
     const created = await issue.issue;
@@ -128,17 +139,32 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
       return;
     }
 
+    // Extract TL;DR from AI description (first ## TL;DR section)
+    let tldr = '';
+    if (description) {
+      const tldrMatch = description.match(/##\s*TL;?DR\s*\n+(.+)/i);
+      if (tldrMatch) {
+        tldr = tldrMatch[1].trim();
+      }
+    }
+
     const embed = new EmbedBuilder()
-      .setTitle(`Issue criada: ${title}`)
+      .setTitle(`📋 ${title}`)
       .setURL(created.url)
       .setColor(0x5e6ad2)
+      .setDescription(tldr ? `> ${tldr}` : null)
       .addFields(
-        { name: 'ID', value: created.identifier, inline: true },
-        { name: 'Team', value: project.linear_team_id, inline: true }
+        { name: '🔖 ID', value: `\`${created.identifier}\``, inline: true },
+        { name: '👥 Time', value: project.linear_team_id, inline: true },
+        { name: '📊 Status', value: '🔵 Backlog', inline: true },
+        { name: '📁 Projeto', value: project.name, inline: true },
+        { name: '👤 Criado por', value: interaction.user.displayName, inline: true },
+        { name: '🤖 AI', value: description ? '✅ Descrição gerada' : '⚠️ Sem descrição', inline: true },
       )
+      .setFooter({ text: `PayPal Mafia Bot • Linear` })
       .setTimestamp();
 
-    await interaction.editReply({ embeds: [embed] });
+    await interaction.editReply({ content: '', embeds: [embed] });
   } catch (error) {
     ctx.logger.error('Linear create issue error:', error);
     await interaction.editReply('Erro ao criar issue no Linear.');
@@ -177,15 +203,31 @@ async function handleSync(interaction: ChatInputCommandInteraction) {
       return;
     }
 
+    const statusEmojis: Record<string, string> = {
+      'Backlog': '🔵',
+      'Todo': '📋',
+      'In Progress': '🟡',
+      'In Review': '🟣',
+      'Done': '✅',
+      'Canceled': '❌',
+    };
+
+    const issueLines = await Promise.all(
+      issues.nodes.map(async (i: any) => {
+        const state = await i.state;
+        const stateName = state?.name || '?';
+        const emoji = statusEmojis[stateName] || '⚪';
+        const assignee = await i.assignee;
+        const assigneeName = assignee ? ` → ${assignee.name}` : '';
+        return `${emoji} **\`${i.identifier}\`** [${i.title}](${i.url})${assigneeName}`;
+      })
+    );
+
     const embed = new EmbedBuilder()
-      .setTitle(`Issues abertas — ${project.linear_team_id}`)
+      .setTitle(`📋 Issues Abertas — ${project.name}`)
       .setColor(0x5e6ad2)
-      .setDescription(
-        issues.nodes
-          .map((i: any) => `**${i.identifier}** — [${i.title}](${i.url})`)
-          .join('\n')
-      )
-      .setFooter({ text: `${issues.nodes.length} issues` })
+      .setDescription(issueLines.join('\n'))
+      .setFooter({ text: `Linear • Time ${project.linear_team_id} • ${issues.nodes.length} issues` })
       .setTimestamp();
 
     await interaction.editReply({ embeds: [embed] });
@@ -221,24 +263,60 @@ function setupWebhookRoutes() {
       const devChannel = channels.first() as TextChannel | undefined;
       if (!devChannel) return;
 
-      const colorMap: Record<string, number> = {
-        create: 0x5e6ad2,
-        update: 0xf2c94c,
-        remove: 0xd73a49,
+      const actionMap: Record<string, { color: number; emoji: string; label: string }> = {
+        create: { color: 0x5e6ad2, emoji: '🆕', label: 'Criada' },
+        update: { color: 0xf2c94c, emoji: '✏️', label: 'Atualizada' },
+        remove: { color: 0xd73a49, emoji: '🗑️', label: 'Removida' },
+      };
+
+      const actionInfo = actionMap[action] || { color: 0x5e6ad2, emoji: '🔔', label: action };
+
+      const statusEmojis: Record<string, string> = {
+        'Backlog': '🔵',
+        'Todo': '📋',
+        'In Progress': '🟡',
+        'In Review': '🟣',
+        'Done': '✅',
+        'Canceled': '❌',
+      };
+      const statusName = data.state?.name || 'Desconhecido';
+      const statusEmoji = statusEmojis[statusName] || '⚪';
+
+      const priorityMap: Record<number, string> = {
+        0: '⚪ Sem prioridade',
+        1: '🔴 Urgente',
+        2: '🟠 Alta',
+        3: '🟡 Média',
+        4: '🟢 Baixa',
       };
 
       const embed = new EmbedBuilder()
-        .setTitle(`Linear: ${data.title || 'Issue'}`)
+        .setTitle(`${actionInfo.emoji} ${data.title || 'Issue'}`)
         .setURL(data.url || '')
-        .setColor(colorMap[action] || 0x5e6ad2)
+        .setColor(actionInfo.color)
         .addFields(
-          { name: 'Action', value: action, inline: true },
-          { name: 'Status', value: data.state?.name || 'Unknown', inline: true }
+          { name: '🔖 ID', value: `\`${data.identifier || '—'}\``, inline: true },
+          { name: '📊 Status', value: `${statusEmoji} ${statusName}`, inline: true },
+          { name: '🎯 Ação', value: actionInfo.label, inline: true },
         )
+        .setFooter({ text: `Linear • ${project.name}` })
         .setTimestamp();
 
+      if (data.priority !== undefined && data.priority !== null) {
+        embed.addFields({ name: '⚡ Prioridade', value: priorityMap[data.priority] || '⚪ Sem prioridade', inline: true });
+      }
+
       if (data.assignee) {
-        embed.addFields({ name: 'Assignee', value: data.assignee.name, inline: true });
+        embed.addFields({ name: '👤 Responsável', value: data.assignee.name, inline: true });
+      }
+
+      if (data.labels && data.labels.length > 0) {
+        embed.addFields({ name: '🏷️ Labels', value: data.labels.map((l: any) => l.name).join(', '), inline: true });
+      }
+
+      if (data.description) {
+        const shortDesc = data.description.length > 200 ? data.description.slice(0, 200) + '...' : data.description;
+        embed.setDescription(`> ${shortDesc}`);
       }
 
       await devChannel.send({ embeds: [embed] });
