@@ -8,9 +8,85 @@ import { Router, type Request, type Response } from 'express';
 import { LinearClient } from '@linear/sdk';
 import type { BotModule, ModuleContext } from '../../types';
 import { generateIssueDescription, classifyIssue } from '../../core/ai';
+import { config } from '../../config';
 
 let ctx: ModuleContext;
 let linearClient: LinearClient | null = null;
+
+let stateCache: { states: Map<string, string>; fetchedAt: number } | null = null;
+
+async function getTeamStates(teamId: string): Promise<Map<string, string>> {
+  if (stateCache && Date.now() - stateCache.fetchedAt < 3600000) {
+    return stateCache.states;
+  }
+
+  if (!linearClient) return new Map();
+
+  const teams = await linearClient.teams({ filter: { id: { eq: teamId } } });
+  const team = teams.nodes[0];
+  if (!team) return new Map();
+
+  const states = await team.states();
+  const stateMap = new Map<string, string>();
+  for (const state of states.nodes) {
+    stateMap.set(state.name.toLowerCase(), state.id);
+  }
+
+  stateCache = { states: stateMap, fetchedAt: Date.now() };
+  return stateMap;
+}
+
+async function closeIssues(identifiers: string[], comment: string): Promise<void> {
+  if (!linearClient) return;
+
+  for (const id of identifiers) {
+    try {
+      const result = await linearClient.searchIssues(id);
+      const issue = result.nodes.find((i: any) => i.identifier === id);
+      if (!issue) continue;
+
+      const team = await issue.team;
+      if (!team) continue;
+
+      const states = await getTeamStates(team.id);
+      const doneStateId = states.get('done');
+
+      if (doneStateId) {
+        await linearClient.updateIssue(issue.id, { stateId: doneStateId });
+      }
+
+      await linearClient.createComment({ issueId: issue.id, body: comment });
+      ctx.logger.info(`Closed Linear issue ${id}`);
+    } catch (error) {
+      ctx.logger.error(`Failed to close issue ${id}:`, error);
+    }
+  }
+}
+
+async function moveIssuesToState(identifiers: string[], stateName: string): Promise<void> {
+  if (!linearClient) return;
+
+  for (const id of identifiers) {
+    try {
+      const result = await linearClient.searchIssues(id);
+      const issue = result.nodes.find((i: any) => i.identifier === id);
+      if (!issue) continue;
+
+      const team = await issue.team;
+      if (!team) continue;
+
+      const states = await getTeamStates(team.id);
+      const stateId = states.get(stateName.toLowerCase());
+
+      if (stateId) {
+        await linearClient.updateIssue(issue.id, { stateId });
+        ctx.logger.info(`Moved ${id} to "${stateName}"`);
+      }
+    } catch (error) {
+      ctx.logger.error(`Failed to move issue ${id} to "${stateName}":`, error);
+    }
+  }
+}
 
 function getProjectFromChannel(interaction: ChatInputCommandInteraction): any | null {
   const channel = interaction.channel as TextChannel;
@@ -91,6 +167,9 @@ export const linearModule: BotModule = {
     }
   },
 };
+
+(linearModule as any).closeIssues = closeIssues;
+(linearModule as any).moveIssuesToState = moveIssuesToState;
 
 async function handleCreateTask(interaction: ChatInputCommandInteraction) {
   if (!linearClient) {
@@ -179,6 +258,28 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
       return;
     }
 
+    // Auto-create branch on GitHub
+    let branchName: string | null = null;
+    if (project.github_repo) {
+      const { generateBranchSlug } = await import('../../utils/linear-ids');
+      const { createBranch } = await import('../../utils/github-api');
+      const slug = generateBranchSlug(title);
+      branchName = `feat/${created.identifier}-${slug}`;
+
+      const branchCreated = await createBranch(
+        project.github_repo,
+        branchName,
+        config.github.token,
+      );
+
+      if (branchCreated) {
+        ctx.logger.info(`Branch created: ${branchName}`);
+      } else {
+        ctx.logger.warn(`Failed to create branch: ${branchName}`);
+        branchName = null;
+      }
+    }
+
     // Extract TL;DR from AI description
     let tldr = '';
     if (description) {
@@ -210,6 +311,10 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
       )
       .setFooter({ text: `PayPal Mafia Bot • Linear • Gemini 3.1 Pro` })
       .setTimestamp();
+
+    if (branchName) {
+      embed.addFields({ name: '🌿 Branch', value: `\`${branchName}\``, inline: false });
+    }
 
     await interaction.editReply({ content: '', embeds: [embed] });
   } catch (error) {
