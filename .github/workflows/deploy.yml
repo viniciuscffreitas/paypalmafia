@@ -49,6 +49,44 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Deploy and notify via SSH
+        id: deploy
+        uses: appleboy/ssh-action@v1
+        continue-on-error: true
+        env:
+          SHA: ${{ github.sha }}
+          AUTHOR: ${{ github.actor }}
+          VERSION: ${{ steps.version.outputs.version }}
+          DEPLOY_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+          COMMIT_LIST: ${{ steps.commits.outputs.list }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          timeout: 60s
+          command_timeout: 5m
+          envs: SHA,AUTHOR,VERSION,DEPLOY_SECRET,COMMIT_LIST
+          script: |
+            cd ~/paypalmafia-bot
+            git pull origin main
+            npm ci
+            npx tsc
+            pm2 restart paypalmafia-bot
+            sleep 5
+            COMMITS_JSON=$(echo "$COMMIT_LIST" | jq -R '{message: ., sha: ""}' | jq -s '.')
+            curl -sf -X POST "http://localhost:3456/webhooks/deploy" \
+              -H "Content-Type: application/json" \
+              -H "X-Deploy-Secret: $DEPLOY_SECRET" \
+              -d "{
+                \"sha\": \"$SHA\",
+                \"author\": \"$AUTHOR\",
+                \"branch\": \"main\",
+                \"commits\": $COMMITS_JSON,
+                \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
+                \"version\": \"$VERSION\"
+              }" || echo "Webhook notification failed (non-fatal)"
+
+      - name: Retry deploy on failure
+        if: steps.deploy.outcome == 'failure'
         uses: appleboy/ssh-action@v1
         env:
           SHA: ${{ github.sha }}
@@ -60,6 +98,8 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          timeout: 90s
+          command_timeout: 5m
           envs: SHA,AUTHOR,VERSION,DEPLOY_SECRET,COMMIT_LIST
           script: |
             cd ~/paypalmafia-bot
