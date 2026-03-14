@@ -120,8 +120,8 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
     // Generate AI description if no manual description provided
     let description = manualDescription || undefined;
     if (!manualDescription) {
-      await interaction.editReply('🤖 Gerando descrição com AI...');
-      const aiDesc = await generateIssueDescription(title, project.name);
+      await interaction.editReply('🤖 Gerando descrição com AI... (buscando contexto no GitHub, Linear e web)');
+      const aiDesc = await generateIssueDescription(title, project.name, project.github_repo, project.linear_team_id);
       if (aiDesc) {
         description = aiDesc;
       }
