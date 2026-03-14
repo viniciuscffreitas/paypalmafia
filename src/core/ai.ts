@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI, DynamicRetrievalMode } from '@google/generative-ai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createLogger } from './logger';
 
 const logger = createLogger('ai');
@@ -48,7 +48,32 @@ Princípios que você DEVE seguir:
 7. Seja conciso — máximo 500 palavras total
 8. Escreva em português brasileiro
 9. NÃO inclua o título da issue na resposta, só a descrição
-10. USE o contexto fornecido (codebase, issues existentes, pesquisa web) para enriquecer a descrição com dados reais — não invente números`;
+10. USE o contexto fornecido (codebase, issues existentes, pesquisa web) para enriquecer a descrição com dados reais — não invente números
+11. CITE FONTES: quando mencionar arquivos do codebase, use links do GitHub (ex: [\`src/app/page.tsx\`](url)). Quando mencionar best practices da web, cite a fonte
+12. Analise o código real fornecido no contexto — se o projeto já tem uma implementação parcial do que a issue pede, mencione isso no Context
+13. Verifique dependências no package.json — se já existe uma lib relevante instalada, mencione. Se precisa instalar algo novo, recomende
+14. NÃO invente funcionalidades que não existem no código — se não tem contexto sobre algo, diga "a ser investigado"`;
+
+export interface IssueMetadata {
+  priority: number; // 0=none, 1=urgent, 2=high, 3=medium, 4=low
+  labels: string[]; // e.g. ['feature', 'frontend', 'ux']
+  estimate: number; // story points: 1, 2, 3, 5, 8
+}
+
+const CLASSIFY_PROMPT = `Você é um product manager. Dado o título de uma issue e contexto do projeto, classifique a issue retornando APENAS um JSON válido (sem markdown, sem code blocks, sem explicação):
+
+{
+  "priority": <number 1-4 onde 1=urgente 2=alta 3=média 4=baixa>,
+  "labels": [<array de strings, escolha entre: "feature", "bug", "improvement", "refactor", "design", "infra", "docs", "research", "ux", "performance", "security", "testing">],
+  "estimate": <number de story points: 1=trivial, 2=pequeno, 3=médio, 5=grande, 8=épico>
+}
+
+Regras:
+- Máximo 3 labels
+- Seja realista com estimates
+- Bugs são geralmente prioridade 2 (alta) ou 1 (urgente)
+- Features novas são geralmente prioridade 3 (média)
+- Responda APENAS o JSON, nada mais`;
 
 let genAI: GoogleGenerativeAI | null = null;
 
@@ -110,7 +135,7 @@ async function fetchGitHubContext(githubRepo: string, title: string): Promise<st
       }
     }
 
-    // 4. Search code for relevant files
+    // 4. Search code for relevant files AND fetch their content
     const searchTerms = title.split(/\s+/).filter(w => w.length > 3).slice(0, 3).join('+');
     if (searchTerms) {
       const searchRes = await fetch(
@@ -122,9 +147,47 @@ async function fetchGitHubContext(githubRepo: string, title: string): Promise<st
         if (search.items && search.items.length > 0) {
           parts.push('\n### Arquivos Relevantes no Codebase');
           for (const item of search.items) {
-            parts.push(`- \`${item.path}\` (${item.repository.full_name})`);
+            parts.push(`- [\`${item.path}\`](https://github.com/${githubRepo}/blob/main/${item.path})`);
+            // Fetch file content (first 100 lines) for context
+            try {
+              const fileRes = await fetch(
+                `https://api.github.com/repos/${githubRepo}/contents/${item.path}`,
+                { headers }
+              );
+              if (fileRes.ok) {
+                const fileData = await fileRes.json() as any;
+                if (fileData.content && fileData.encoding === 'base64') {
+                  const content = Buffer.from(fileData.content, 'base64').toString('utf-8');
+                  const preview = content.split('\n').slice(0, 50).join('\n');
+                  parts.push(`\`\`\`\n${preview}\n\`\`\``);
+                }
+              }
+            } catch {
+              // Skip file content on error
+            }
           }
         }
+      }
+    }
+
+    // 4b. Also fetch key config files for project understanding
+    const keyFiles = ['package.json', 'next.config.ts', 'next.config.js', 'tsconfig.json'];
+    for (const keyFile of keyFiles) {
+      try {
+        const fileRes = await fetch(
+          `https://api.github.com/repos/${githubRepo}/contents/${keyFile}`,
+          { headers }
+        );
+        if (fileRes.ok) {
+          const fileData = await fileRes.json() as any;
+          if (fileData.content && fileData.encoding === 'base64') {
+            const content = Buffer.from(fileData.content, 'base64').toString('utf-8');
+            parts.push(`\n### Conteúdo de \`${keyFile}\` ([ver no GitHub](https://github.com/${githubRepo}/blob/main/${keyFile}))`);
+            parts.push(`\`\`\`json\n${content.slice(0, 1500)}\n\`\`\``);
+          }
+        }
+      } catch {
+        // Skip
       }
     }
 
@@ -218,21 +281,6 @@ export async function generateIssueDescription(
 
     logger.info(`Context gathered: GitHub=${githubContext.length}chars, Linear=${linearContext.length}chars`);
 
-    // Use Gemini with Google Search grounding for web context
-    const model = genAI.getGenerativeModel(
-      {
-        model: 'gemini-3.1-pro-preview',
-        tools: [{
-          googleSearchRetrieval: {
-            dynamicRetrievalConfig: {
-              mode: DynamicRetrievalMode.MODE_DYNAMIC,
-              dynamicThreshold: 0.3, // Low threshold = more likely to search
-            },
-          },
-        }],
-      },
-    );
-
     let contextBlock = '';
     if (githubContext || linearContext) {
       contextBlock = '\n\n--- CONTEXTO DO PROJETO (use para enriquecer a descrição) ---\n';
@@ -242,21 +290,35 @@ export async function generateIssueDescription(
     }
 
     const projectHint = projectName ? `\nProjeto: ${projectName}` : '';
-    const prompt = `${ISSUE_TEMPLATE_PROMPT}${contextBlock}\n\nGere a descrição para esta issue:\nTítulo: ${title}${projectHint}\n\nPesquise na web sobre o tema da issue para adicionar contexto técnico relevante (best practices, bibliotecas recomendadas, padrões de mercado). Cite fontes quando possível.`;
+    const prompt = `${ISSUE_TEMPLATE_PROMPT}${contextBlock}\n\nGere a descrição para esta issue:\nTítulo: ${title}${projectHint}\n\nUse o contexto do projeto fornecido acima para referenciar arquivos reais, commits recentes, issues existentes e estrutura do codebase. Adicione também recomendações técnicas baseadas em best practices de mercado.`;
 
+    // Try with google_search tool first (new API format for Gemini 3.x)
+    try {
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-3.1-pro-preview',
+        tools: [{ googleSearch: {} } as any],
+      });
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+      logger.info(`AI generated description for: ${title} (${text.length} chars, with search + context)`);
+      return text;
+    } catch (searchError) {
+      logger.warn('Google Search tool failed, retrying without:', searchError);
+    }
+
+    // Fallback: without search tool but WITH context
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.1-pro-preview' });
     const result = await model.generateContent(prompt);
-    const response = result.response;
-    const text = response.text();
-
-    logger.info(`AI generated description for: ${title} (${text.length} chars, with context)`);
+    const text = result.response.text();
+    logger.info(`AI generated description for: ${title} (${text.length} chars, with context, no search)`);
     return text;
   } catch (error) {
     logger.error('AI generation failed:', error);
 
-    // Fallback: try without search grounding
+    // Last resort fallback
     try {
-      logger.info('Retrying without search grounding...');
-      const model = genAI.getGenerativeModel({ model: 'gemini-3.1-pro-preview' });
+      logger.info('Retrying with basic prompt...');
+      const model = genAI!.getGenerativeModel({ model: 'gemini-3.1-pro-preview' });
       const prompt = `${ISSUE_TEMPLATE_PROMPT}\n\nGere a descrição para esta issue:\nTítulo: ${title}\nProjeto: ${projectName || 'N/A'}`;
       const result = await model.generateContent(prompt);
       return result.response.text();
@@ -264,5 +326,32 @@ export async function generateIssueDescription(
       logger.error('AI fallback also failed:', fallbackError);
       return null;
     }
+  }
+}
+
+export async function classifyIssue(title: string, description?: string): Promise<IssueMetadata> {
+  const defaults: IssueMetadata = { priority: 3, labels: ['feature'], estimate: 3 };
+  if (!genAI) return defaults;
+
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.1-pro-preview' });
+    const context = description ? `\nDescrição: ${description.slice(0, 500)}` : '';
+    const prompt = `${CLASSIFY_PROMPT}\n\nTítulo: ${title}${context}`;
+
+    const result = await model.generateContent(prompt);
+    const text = result.response.text().trim();
+
+    // Parse JSON - handle potential markdown wrapping
+    const jsonStr = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(jsonStr);
+
+    return {
+      priority: Math.min(4, Math.max(1, parsed.priority || 3)),
+      labels: Array.isArray(parsed.labels) ? parsed.labels.slice(0, 3) : ['feature'],
+      estimate: [1, 2, 3, 5, 8].includes(parsed.estimate) ? parsed.estimate : 3,
+    };
+  } catch (error) {
+    logger.warn('Issue classification failed, using defaults:', error);
+    return defaults;
   }
 }

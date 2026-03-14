@@ -7,7 +7,7 @@ import {
 import { Router, type Request, type Response } from 'express';
 import { LinearClient } from '@linear/sdk';
 import type { BotModule, ModuleContext } from '../../types';
-import { generateIssueDescription } from '../../core/ai';
+import { generateIssueDescription, classifyIssue } from '../../core/ai';
 
 let ctx: ModuleContext;
 let linearClient: LinearClient | null = null;
@@ -117,20 +117,60 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
       return;
     }
 
-    // Generate AI description if no manual description provided
+    // Generate AI description and classify in parallel
     let description = manualDescription || undefined;
+    let metadata = { priority: 3, labels: ['feature'] as string[], estimate: 3 };
+
     if (!manualDescription) {
       await interaction.editReply('🤖 Gerando descrição com AI... (buscando contexto no GitHub, Linear e web)');
-      const aiDesc = await generateIssueDescription(title, project.name, project.github_repo, project.linear_team_id);
-      if (aiDesc) {
-        description = aiDesc;
-      }
+      const [aiDesc, aiMeta] = await Promise.all([
+        generateIssueDescription(title, project.name, project.github_repo, project.linear_team_id),
+        classifyIssue(title),
+      ]);
+      if (aiDesc) description = aiDesc;
+      metadata = aiMeta;
     }
 
-    const issue = await linearClient.createIssue({
+    // Find or create labels in Linear
+    const labelIds: string[] = [];
+    try {
+      const existingLabels = await team.labels();
+      for (const labelName of metadata.labels) {
+        const existing = existingLabels.nodes.find(
+          (l: any) => l.name.toLowerCase() === labelName.toLowerCase()
+        );
+        if (existing) {
+          labelIds.push(existing.id);
+        } else {
+          const created = await linearClient!.createIssueLabel({ name: labelName, teamId: team.id });
+          const label = await created.issueLabel;
+          if (label) labelIds.push(label.id);
+        }
+      }
+    } catch (err) {
+      ctx.logger.warn('Could not sync labels:', err);
+    }
+
+    // Find active cycle
+    let cycleId: string | undefined;
+    try {
+      const cycles = await team.cycles({ filter: { isActive: { eq: true } } });
+      if (cycles.nodes.length > 0) {
+        cycleId = cycles.nodes[0].id;
+      }
+    } catch {
+      // No active cycle
+    }
+
+    // Create issue with all metadata
+    const issue = await linearClient!.createIssue({
       teamId: team.id,
       title,
       description,
+      priority: metadata.priority,
+      estimate: metadata.estimate,
+      labelIds: labelIds.length > 0 ? labelIds : undefined,
+      cycleId,
     });
 
     const created = await issue.issue;
@@ -139,7 +179,7 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
       return;
     }
 
-    // Extract TL;DR from AI description (first ## TL;DR section)
+    // Extract TL;DR from AI description
     let tldr = '';
     if (description) {
       const tldrMatch = description.match(/##\s*TL;?DR\s*\n+(.+)/i);
@@ -148,20 +188,27 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
       }
     }
 
+    const priorityMap: Record<number, string> = {
+      1: '🔴 Urgente', 2: '🟠 Alta', 3: '🟡 Média', 4: '🟢 Baixa',
+    };
+
     const embed = new EmbedBuilder()
       .setTitle(`📋 ${title}`)
       .setURL(created.url)
       .setColor(0x5e6ad2)
       .setDescription(tldr ? `> ${tldr}` : null)
       .addFields(
-        { name: '🔖 ID', value: `\`${created.identifier}\``, inline: true },
+        { name: '🔖 ID', value: `[\`${created.identifier}\`](${created.url})`, inline: true },
         { name: '👥 Time', value: project.linear_team_id, inline: true },
         { name: '📊 Status', value: '🔵 Backlog', inline: true },
+        { name: '⚡ Prioridade', value: priorityMap[metadata.priority] || '🟡 Média', inline: true },
+        { name: '🎯 Estimativa', value: `${metadata.estimate} pontos`, inline: true },
+        { name: '🏷️ Labels', value: metadata.labels.join(', ') || 'nenhum', inline: true },
         { name: '📁 Projeto', value: project.name, inline: true },
         { name: '👤 Criado por', value: interaction.user.displayName, inline: true },
-        { name: '🤖 AI', value: description ? '✅ Descrição gerada' : '⚠️ Sem descrição', inline: true },
+        { name: '🔄 Sprint', value: cycleId ? '✅ Atribuído' : '⚠️ Sem sprint ativo', inline: true },
       )
-      .setFooter({ text: `PayPal Mafia Bot • Linear` })
+      .setFooter({ text: `PayPal Mafia Bot • Linear • Gemini 3.1 Pro` })
       .setTimestamp();
 
     await interaction.editReply({ content: '', embeds: [embed] });
