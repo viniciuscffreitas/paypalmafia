@@ -25,6 +25,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -51,18 +53,30 @@ jobs:
         id: version
         run: echo "version=$(jq -r .version package.json)" >> $GITHUB_OUTPUT
 
-      - name: Notify deploy webhook
-        if: success()
+      - name: Collect commit info
+        id: commits
         run: |
           COMMITS=$(git log --format='{"message":"%s","sha":"%H"}' -10 ${{ github.event.before }}..${{ github.sha }} | jq -s '.')
-          curl -s -X POST "${{ secrets.WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -H "X-Deploy-Secret: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}" \
-            -d "{
-              \"sha\": \"${{ github.sha }}\",
-              \"author\": \"${{ github.actor }}\",
-              \"branch\": \"main\",
-              \"commits\": $COMMITS,
-              \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
-              \"version\": \"${{ steps.version.outputs.version }}\"
-            }"
+          echo "json<<COMMITS_EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "COMMITS_EOF" >> $GITHUB_OUTPUT
+
+      - name: Notify deploy webhook via SSH
+        if: success()
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            curl -s -X POST "http://localhost:3456/webhooks/deploy" \
+              -H "Content-Type: application/json" \
+              -H "X-Deploy-Secret: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}" \
+              -d '{
+                "sha": "${{ github.sha }}",
+                "author": "${{ github.actor }}",
+                "branch": "main",
+                "commits": ${{ steps.commits.outputs.json }},
+                "timestamp": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'",
+                "version": "${{ steps.version.outputs.version }}"
+              }'
