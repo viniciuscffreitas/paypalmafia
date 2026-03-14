@@ -29,7 +29,10 @@ push main → GitHub Actions → npm ci → build → test (smoke) → SSH deplo
 - `VPS_HOST` — hostname da VPS
 - `VPS_USER` — usuário SSH
 - `VPS_SSH_KEY` — chave privada SSH
+- `DEPLOY_WEBHOOK_SECRET` — shared secret para autenticar o POST do deploy
 - `WEBHOOK_URL` — URL do webhook do bot (ex: `http://petshopcisnebranco.com.br:3456/webhooks/deploy`)
+
+> **Nota:** A VPS deve ter `WEBHOOK_PORT=3456` no `.env` (o default do config.ts é 3000).
 
 ### Smoke tests (`npm test`)
 
@@ -48,6 +51,8 @@ Recebe webhook do GitHub Actions pós-deploy. Notifica Discord, comenta nas issu
 
 ### Webhook: `POST /webhooks/deploy`
 
+**Autenticação:** O GitHub Actions envia header `X-Deploy-Secret` com o valor de `DEPLOY_WEBHOOK_SECRET`. O módulo verifica com `timingSafeEqual` antes de processar. Requests sem secret válido recebem 401.
+
 Payload esperado:
 
 ```json
@@ -64,11 +69,13 @@ Payload esperado:
 }
 ```
 
+O campo `version` é lido do `package.json` no GitHub Actions (`jq -r .version package.json`).
+
 ### Ao receber o webhook:
 
 1. **Salva no banco** — tabela `deployments`
 2. **AI summary** (Gemini) — gera resumo dos commits em linguagem natural
-3. **AI risk analysis** (Gemini, paralelo) — analisa diffs via GitHub API, classifica risco (baixo/médio/alto), identifica áreas afetadas e breaking changes
+3. **AI risk analysis** (Gemini, paralelo) — busca diffs via `GET /repos/{owner}/{repo}/compare/{base}...{head}` (base SHA vem do deploy anterior na tabela `deployments`), classifica risco (baixo/médio/alto), identifica áreas afetadas e breaking changes
 4. **Posta no Discord** — embed rico no canal `#dev` de cada projeto afetado
 5. **Fecha issues no Linear** — parseia `PM-123` dos commit messages, move pra "Done", comenta "Deployed in v{version}" com o summary
 
@@ -89,7 +96,13 @@ Issues fechadas: PM-123, PM-127
 
 Lista últimos 10 deploys com SHA, autor, data, commit count, e summary.
 
-### Migration
+### Graceful degradation
+
+- Se Gemini falhar: posta embed sem AI summary (lista commits crus)
+- Se Linear API estiver fora: loga erro, não bloqueia notificação no Discord
+- Se GitHub API (diffs) falhar: posta sem risk analysis
+
+### Migration (`005_deployments`)
 
 ```sql
 CREATE TABLE deployments (
@@ -128,6 +141,8 @@ ref: refs/heads/feat/PM-123-titulo-slug
 sha: HEAD da main
 ```
 
+Usa `fetch` nativo (Node 22) com `config.github.token`. O token precisa de scope `contents:write` no GitHub.
+
 Slug: lowercase, sem acentos, espaços → `-`, trunca em 50 chars.
 
 Resposta no Discord inclui a branch pronta.
@@ -146,12 +161,23 @@ Dois novos event handlers no webhook:
 - Move issue pra "Done" no Linear
 - Posta no Discord
 
+> **Nota:** Esses handlers são adicionados dentro do bloco `event === 'pull_request'` existente no `handleGitHubEvent`, não como handlers separados. Isso evita notificações duplicadas no Discord.
+
 ### Utility compartilhada
 
 ```typescript
 // src/utils/linear-ids.ts
-export function extractLinearIds(text: string): string[] {
-  const matches = text.match(/[A-Z]{2,5}-\d+/g);
+
+/**
+ * Extrai identificadores de issues do Linear de um texto.
+ * Valida contra Linear API antes de agir (evita falsos positivos como HTTP-200, SSH-22).
+ * O teamPrefix é configurável por projeto (ex: 'PM').
+ */
+export function extractLinearIds(text: string, teamPrefix?: string): string[] {
+  const pattern = teamPrefix
+    ? new RegExp(`${teamPrefix}-\\d+`, 'g')
+    : /[A-Z]{2,5}-\d+/g;
+  const matches = text.match(pattern);
   return matches ? [...new Set(matches)] : [];
 }
 
@@ -168,7 +194,7 @@ export function generateBranchSlug(title: string): string {
 
 ### Cache de estados do Linear
 
-Na primeira chamada, busca estados do time (`team.states()`) e cacheia em memória (Map). Invalida a cada 1h.
+Na primeira chamada, busca estados do time (`team.states()`) e cacheia em memória (Map). Invalidação por TTL: a cada acesso, se `Date.now() - lastFetch > 3600000` (1h), refaz o fetch.
 
 ### Opt-in
 
@@ -220,6 +246,12 @@ test('webhook server responds to /health')
 - Chamadas reais pro Linear/GitHub (mockadas)
 - UI de embeds
 
+### package.json script
+
+```json
+"test": "vitest run"
+```
+
 ### CI config
 
 ```yaml
@@ -264,12 +296,12 @@ Claude Code:
 
 ## Ordem de implementação
 
-1. Testes (smoke) + Vitest setup
+1. Testes (smoke) + Vitest setup + script `"test"` no `package.json`
 2. Utility functions (`extractLinearIds`, `generateBranchSlug`)
-3. GitHub Actions workflow (CI/CD)
-4. Módulo `deploy` (webhook + banco + AI)
-5. Issue lifecycle no módulo `linear` (auto-branch)
-6. Issue lifecycle no módulo `github` (PR → Linear state transitions)
+3. GitHub Actions workflow (CI/CD com SSH deploy)
+4. Módulo `deploy` (webhook autenticado + banco `005_deployments` + AI) + registrar `deployModule` em `bot.ts`
+5. Issue lifecycle no módulo `linear` (auto-branch via GitHub API com `fetch` nativo)
+6. Issue lifecycle no módulo `github` (PR → Linear state transitions, dentro do handler existente)
 7. Testes de módulo progressivos
 
 ## Dependências novas
