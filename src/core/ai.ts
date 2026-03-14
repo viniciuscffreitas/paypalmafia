@@ -363,3 +363,57 @@ export async function classifyIssue(title: string, description?: string): Promis
     return defaults;
   }
 }
+
+export async function generateDeploySummary(
+  commits: { message: string; sha: string }[],
+): Promise<string | null> {
+  if (!genAI) return null;
+
+  const commitList = commits.map((c) => `- ${c.message} (${c.sha.slice(0, 7)})`).join('\n');
+
+  const prompt = `Você é um assistente de DevOps. Gere um resumo conciso (2-3 frases) em português do que foi deployado, baseado nestes commits:
+
+${commitList}
+
+Foque no impacto pro usuário/sistema, não nos detalhes técnicos. Seja direto.`;
+
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.1-pro-preview' });
+    const result = await model.generateContent(prompt);
+    return result.response.text().trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function analyzeDeployRisk(
+  diffSummary: { filename: string; status: string; additions: number; deletions: number }[],
+): Promise<{ level: string; areas: string[]; breaking: string[] } | null> {
+  if (!genAI) return null;
+
+  const fileList = diffSummary
+    .map((f) => `- ${f.filename} (${f.status}, +${f.additions} -${f.deletions})`)
+    .join('\n');
+
+  const prompt = `Analise o risco deste deploy baseado nos arquivos modificados:
+
+${fileList}
+
+Responda APENAS em JSON válido:
+{
+  "level": "baixo" | "medio" | "alto",
+  "areas": ["lista de áreas/módulos afetados"],
+  "breaking": ["lista de possíveis breaking changes, ou vazio se nenhum"]
+}`;
+
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.1-pro-preview' });
+    const result = await model.generateContent(prompt);
+    const text = result.response.text().trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    return JSON.parse(jsonMatch[0]);
+  } catch {
+    return null;
+  }
+}
