@@ -5,6 +5,7 @@ import {
   EmbedBuilder,
 } from 'discord.js';
 import type { BotModule, ModuleContext } from '../../types';
+import { handleProjectStatus } from './status';
 
 let ctx: ModuleContext;
 
@@ -33,6 +34,14 @@ export const projectsModule: BotModule = {
           .addStringOption((opt) =>
             opt.setName('name').setDescription('Project name').setRequired(true)
           )
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('status')
+          .setDescription('Generate full project status report with AI')
+          .addStringOption((opt) =>
+            opt.setName('name').setDescription('Project name (default: current channel project)')
+          )
       ) as any,
   ],
 
@@ -52,6 +61,8 @@ export const projectsModule: BotModule = {
       await handleList(interaction);
     } else if (sub === 'archive') {
       await handleArchive(interaction);
+    } else if (sub === 'status') {
+      await handleProjectStatus(interaction, ctx);
     }
   },
 };
