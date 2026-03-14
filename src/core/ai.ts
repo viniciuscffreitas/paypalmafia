@@ -221,7 +221,7 @@ export async function generateIssueDescription(
     // Use Gemini with Google Search grounding for web context
     const model = genAI.getGenerativeModel(
       {
-        model: 'gemini-2.0-flash',
+        model: 'gemini-3.1-pro-preview',
         tools: [{
           googleSearchRetrieval: {
             dynamicRetrievalConfig: {
@@ -256,7 +256,7 @@ export async function generateIssueDescription(
     // Fallback: try without search grounding
     try {
       logger.info('Retrying without search grounding...');
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+      const model = genAI.getGenerativeModel({ model: 'gemini-3.1-pro-preview' });
       const prompt = `${ISSUE_TEMPLATE_PROMPT}\n\nGere a descrição para esta issue:\nTítulo: ${title}\nProjeto: ${projectName || 'N/A'}`;
       const result = await model.generateContent(prompt);
       return result.response.text();
