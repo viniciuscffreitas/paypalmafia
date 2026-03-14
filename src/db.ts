@@ -86,6 +86,22 @@ function runMigrations(db: Database.Database): void {
         );
       `,
     },
+    {
+      name: '005_deployments',
+      sql: `
+        CREATE TABLE IF NOT EXISTS deployments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          sha TEXT NOT NULL,
+          author TEXT,
+          version TEXT,
+          commit_count INTEGER DEFAULT 0,
+          commit_messages TEXT,
+          ai_summary TEXT,
+          risk_level TEXT,
+          deployed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `,
+    },
   ];
 
   const applied = new Set(

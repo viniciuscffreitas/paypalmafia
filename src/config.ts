@@ -27,6 +27,9 @@ export const config = {
     apiKey: process.env['LINEAR_API_KEY'] || '',
     webhookSecret: process.env['LINEAR_WEBHOOK_SECRET'] || '',
   },
+  deploy: {
+    webhookSecret: process.env['DEPLOY_WEBHOOK_SECRET'] || '',
+  },
   webhook: {
     port: parseInt(optional('WEBHOOK_PORT', '3000'), 10),
   },
