@@ -7,6 +7,7 @@ import {
 import { Router, type Request, type Response } from 'express';
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { BotModule, ModuleContext } from '../../types';
+import { extractLinearIds } from '../../utils/linear-ids';
 
 let ctx: ModuleContext;
 
@@ -159,9 +160,25 @@ async function handleGitHubEvent(event: string, payload: any) {
       .setAuthor({ name: pr.user.login })
       .addFields(
         { name: 'Branch', value: `${pr.head.ref} → ${pr.base.ref}`, inline: true },
-        { name: 'Changes', value: `+${pr.additions} -${pr.deletions}`, inline: true }
+        { name: 'Changes', value: `+${pr.additions} -${pr.deletions}`, inline: true },
       )
       .setTimestamp();
+
+    // Linear issue lifecycle transitions
+    const searchText = `${pr.title} ${pr.body || ''} ${pr.head.ref}`;
+    const linearIds = extractLinearIds(searchText, project.linear_team_id || undefined);
+
+    if (linearIds.length > 0) {
+      const linearMod = ctx.getModule('linear') as any;
+
+      if (action === 'opened' && linearMod?.moveIssuesToState) {
+        await linearMod.moveIssuesToState(linearIds, 'in review');
+        embed.addFields({ name: 'Linear', value: `${linearIds.join(', ')} → In Review` });
+      } else if (action === 'closed' && pr.merged && linearMod?.closeIssues) {
+        await linearMod.closeIssues(linearIds, `Merged via PR #${pr.number}`);
+        embed.addFields({ name: 'Linear', value: `${linearIds.join(', ')} → Done` });
+      }
+    }
   } else if (event === 'check_run' && payload.check_run?.conclusion === 'failure') {
     const check = payload.check_run;
     embed = new EmbedBuilder()
