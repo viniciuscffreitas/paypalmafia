@@ -1,0 +1,68 @@
+name: Build, Test & Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  deploy:
+    needs: build-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd ~/paypalmafia-bot
+            git pull origin main
+            npm ci --production
+            npm run build
+            pm2 restart paypalmafia-bot
+
+      - name: Get version from package.json
+        id: version
+        run: echo "version=$(jq -r .version package.json)" >> $GITHUB_OUTPUT
+
+      - name: Notify deploy webhook
+        if: success()
+        run: |
+          COMMITS=$(git log --format='{"message":"%s","sha":"%H"}' -10 ${{ github.event.before }}..${{ github.sha }} | jq -s '.')
+          curl -s -X POST "${{ secrets.WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -H "X-Deploy-Secret: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}" \
+            -d "{
+              \"sha\": \"${{ github.sha }}\",
+              \"author\": \"${{ github.actor }}\",
+              \"branch\": \"main\",
+              \"commits\": $COMMITS,
+              \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
+              \"version\": \"${{ steps.version.outputs.version }}\"
+            }"
