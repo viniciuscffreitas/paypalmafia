@@ -166,7 +166,7 @@ async function handleDeployEvent(payload: any) {
   const guild = ctx.client.guilds.cache.first();
   if (guild) {
     const projects = ctx.db
-      .prepare('SELECT * FROM projects WHERE archived_at IS NULL')
+      .prepare('SELECT * FROM projects WHERE github_repo IS NOT NULL AND archived_at IS NULL')
       .all() as any[];
 
     for (const project of projects) {
