@@ -7,7 +7,8 @@
     "build": "tsc",
     "start": "node dist/bot.js",
     "dev": "tsx watch src/bot.ts",
-    "deploy-commands": "tsx src/deploy-commands.ts"
+    "deploy-commands": "tsx src/deploy-commands.ts",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -24,6 +25,7 @@
     "@types/node": "^22.0.0",
     "@types/node-cron": "^3.0.11",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.4"
   }
 }
