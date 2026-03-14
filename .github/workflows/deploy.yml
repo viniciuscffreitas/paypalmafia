@@ -36,19 +36,6 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      - name: Deploy to VPS via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            cd ~/paypalmafia-bot
-            git pull origin main
-            npm ci
-            npx tsc
-            pm2 restart paypalmafia-bot
-
       - name: Get version from package.json
         id: version
         run: echo "version=$(jq -r .version package.json)" >> $GITHUB_OUTPUT
@@ -56,27 +43,40 @@ jobs:
       - name: Collect commit info
         id: commits
         run: |
-          COMMITS=$(git log --format='{"message":"%s","sha":"%H"}' -10 ${{ github.event.before }}..${{ github.sha }} | jq -s '.')
-          echo "json<<COMMITS_EOF" >> $GITHUB_OUTPUT
+          COMMITS=$(git log --format='%s' -10 ${{ github.event.before }}..${{ github.sha }} | head -10)
+          echo "list<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMITS" >> $GITHUB_OUTPUT
-          echo "COMMITS_EOF" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Notify deploy webhook via SSH
-        if: success()
+      - name: Deploy and notify via SSH
         uses: appleboy/ssh-action@v1
+        env:
+          SHA: ${{ github.sha }}
+          AUTHOR: ${{ github.actor }}
+          VERSION: ${{ steps.version.outputs.version }}
+          DEPLOY_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+          COMMIT_LIST: ${{ steps.commits.outputs.list }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          envs: SHA,AUTHOR,VERSION,DEPLOY_SECRET,COMMIT_LIST
           script: |
-            curl -s -X POST "http://localhost:3456/webhooks/deploy" \
+            cd ~/paypalmafia-bot
+            git pull origin main
+            npm ci
+            npx tsc
+            pm2 restart paypalmafia-bot
+            sleep 5
+            COMMITS_JSON=$(echo "$COMMIT_LIST" | jq -R '{message: ., sha: ""}' | jq -s '.')
+            curl -sf -X POST "http://localhost:3456/webhooks/deploy" \
               -H "Content-Type: application/json" \
-              -H "X-Deploy-Secret: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}" \
-              -d '{
-                "sha": "${{ github.sha }}",
-                "author": "${{ github.actor }}",
-                "branch": "main",
-                "commits": ${{ steps.commits.outputs.json }},
-                "timestamp": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'",
-                "version": "${{ steps.version.outputs.version }}"
-              }'
+              -H "X-Deploy-Secret: $DEPLOY_SECRET" \
+              -d "{
+                \"sha\": \"$SHA\",
+                \"author\": \"$AUTHOR\",
+                \"branch\": \"main\",
+                \"commits\": $COMMITS_JSON,
+                \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
+                \"version\": \"$VERSION\"
+              }" || echo "Webhook notification failed (non-fatal)"
