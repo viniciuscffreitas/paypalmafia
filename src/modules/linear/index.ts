@@ -7,7 +7,8 @@ import {
 import { Router, type Request, type Response } from 'express';
 import { LinearClient } from '@linear/sdk';
 import type { BotModule, ModuleContext } from '../../types';
-import { generateIssueDescription, classifyIssue } from '../../core/ai';
+import { generateIssueDescription, classifyIssue, reformatIssueTitle } from '../../core/ai';
+import { buildPreviewEmbed, buildConfirmRow, extractTldr } from './task-preview';
 import { config } from '../../config';
 
 let ctx: ModuleContext;
@@ -185,7 +186,7 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
 
   await interaction.deferReply();
 
-  const title = interaction.options.getString('title', true);
+  const rawTitle = interaction.options.getString('title', true);
   const manualDescription = interaction.options.getString('description');
 
   try {
@@ -196,21 +197,57 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
       return;
     }
 
-    // Generate AI description and classify in parallel
-    let description = manualDescription || undefined;
-    let metadata = { priority: 3, labels: ['feature'] as string[], estimate: 3 };
+    // Step 1 — AI formats everything in parallel
+    await interaction.editReply('🤖 Formatando task com AI...');
+    const [title, description, metadata] = await Promise.all([
+      reformatIssueTitle(rawTitle),
+      manualDescription
+        ? Promise.resolve(manualDescription)
+        : generateIssueDescription(rawTitle, project.name, project.github_repo, project.linear_team_id),
+      classifyIssue(rawTitle),
+    ]);
 
-    if (!manualDescription) {
-      await interaction.editReply('🤖 Gerando descrição com AI... (buscando contexto no GitHub, Linear e web)');
-      const [aiDesc, aiMeta] = await Promise.all([
-        generateIssueDescription(title, project.name, project.github_repo, project.linear_team_id),
-        classifyIssue(title),
-      ]);
-      if (aiDesc) description = aiDesc;
-      metadata = aiMeta;
+    const resolvedDescription = description ?? undefined;
+
+    // Step 2 — Show preview with confirm/cancel buttons
+    const previewEmbed = buildPreviewEmbed(
+      title,
+      rawTitle,
+      resolvedDescription,
+      metadata,
+      interaction.user.displayName,
+      project.name,
+    );
+    const confirmRow = buildConfirmRow();
+
+    const previewMsg = await interaction.editReply({
+      content: '',
+      embeds: [previewEmbed],
+      components: [confirmRow],
+    });
+
+    // Step 3 — Wait for confirmation (5 min timeout)
+    let confirmed = false;
+    try {
+      const buttonInteraction = await previewMsg.awaitMessageComponent({
+        filter: (i) => i.user.id === interaction.user.id && ['task_confirm', 'task_cancel'].includes(i.customId),
+        time: 5 * 60 * 1000,
+      });
+
+      await buttonInteraction.deferUpdate();
+      confirmed = buttonInteraction.customId === 'task_confirm';
+    } catch {
+      // Timeout — treat as cancel
     }
 
-    // Find or create labels in Linear
+    if (!confirmed) {
+      await interaction.editReply({ content: '❌ Criação de task cancelada.', embeds: [], components: [] });
+      return;
+    }
+
+    await interaction.editReply({ content: '⏳ Criando issue no Linear...', embeds: [], components: [] });
+
+    // Step 4 — Create issue
     const labelIds: string[] = [];
     try {
       const existingLabels = await team.labels();
@@ -230,22 +267,18 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
       ctx.logger.warn('Could not sync labels:', err);
     }
 
-    // Find active cycle
     let cycleId: string | undefined;
     try {
       const cycles = await team.cycles({ filter: { isActive: { eq: true } } });
-      if (cycles.nodes.length > 0) {
-        cycleId = cycles.nodes[0].id;
-      }
+      if (cycles.nodes.length > 0) cycleId = cycles.nodes[0].id;
     } catch {
       // No active cycle
     }
 
-    // Create issue with all metadata
     const issue = await linearClient!.createIssue({
       teamId: team.id,
       title,
-      description,
+      description: resolvedDescription,
       priority: metadata.priority,
       estimate: metadata.estimate,
       labelIds: labelIds.length > 0 ? labelIds : undefined,
@@ -258,20 +291,14 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
       return;
     }
 
-    // Auto-create branch on GitHub
+    // Step 5 — Auto-create GitHub branch
     let branchName: string | null = null;
     if (project.github_repo) {
       const { generateBranchSlug } = await import('../../utils/linear-ids');
       const { createBranch } = await import('../../utils/github-api');
       const slug = generateBranchSlug(title);
       branchName = `feat/${created.identifier}-${slug}`;
-
-      const branchCreated = await createBranch(
-        project.github_repo,
-        branchName,
-        config.github.token,
-      );
-
+      const branchCreated = await createBranch(project.github_repo, branchName, config.github.token);
       if (branchCreated) {
         ctx.logger.info(`Branch created: ${branchName}`);
       } else {
@@ -280,20 +307,13 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
       }
     }
 
-    // Extract TL;DR from AI description
-    let tldr = '';
-    if (description) {
-      const tldrMatch = description.match(/##\s*TL;?DR\s*\n+(.+)/i);
-      if (tldrMatch) {
-        tldr = tldrMatch[1].trim();
-      }
-    }
-
+    // Step 6 — Final confirmation embed
     const priorityMap: Record<number, string> = {
       1: '🔴 Urgente', 2: '🟠 Alta', 3: '🟡 Média', 4: '🟢 Baixa',
     };
+    const tldr = resolvedDescription ? extractTldr(resolvedDescription) : '';
 
-    const embed = new EmbedBuilder()
+    const finalEmbed = new EmbedBuilder()
       .setTitle(`📋 ${title}`)
       .setURL(created.url)
       .setColor(0x5e6ad2)
@@ -309,17 +329,17 @@ async function handleCreateTask(interaction: ChatInputCommandInteraction) {
         { name: '👤 Criado por', value: interaction.user.displayName, inline: true },
         { name: '🔄 Sprint', value: cycleId ? '✅ Atribuído' : '⚠️ Sem sprint ativo', inline: true },
       )
-      .setFooter({ text: `PayPal Mafia Bot • Linear • Gemini 3.1 Pro` })
+      .setFooter({ text: 'PayPal Mafia Bot • Linear • Gemini 3.1 Pro' })
       .setTimestamp();
 
     if (branchName) {
-      embed.addFields({ name: '🌿 Branch', value: `\`${branchName}\``, inline: false });
+      finalEmbed.addFields({ name: '🌿 Branch', value: `\`${branchName}\``, inline: false });
     }
 
-    await interaction.editReply({ content: '', embeds: [embed] });
+    await interaction.editReply({ content: '', embeds: [finalEmbed], components: [] });
   } catch (error) {
     ctx.logger.error('Linear create issue error:', error);
-    await interaction.editReply('Erro ao criar issue no Linear.');
+    await interaction.editReply({ content: 'Erro ao criar issue no Linear.', components: [] });
   }
 }
 

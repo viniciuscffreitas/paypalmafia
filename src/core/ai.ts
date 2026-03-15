@@ -60,6 +60,33 @@ export interface IssueMetadata {
   estimate: number; // story points: 1, 2, 3, 5, 8
 }
 
+/**
+ * Sanitizes a raw AI-generated title string.
+ * Strips markdown, takes only the first line, truncates, and falls back to original if empty.
+ */
+export function sanitizeAiTitle(raw: string, fallback: string): string {
+  const firstLine = raw.split('\n')[0] ?? '';
+  const stripped = firstLine
+    .replace(/^#+\s*/, '')              // remove markdown headings
+    .replace(/\*\*/g, '')               // remove bold
+    .replace(/`/g, '')                  // remove inline code
+    .replace(/^["'\u201c\u2018]+|["'\u201d\u2019]+$/g, '') // remove surrounding quotes (straight + curly)
+    .trim();
+
+  if (!stripped) return fallback;
+
+  return stripped.length > 120 ? stripped.slice(0, 120) : stripped;
+}
+
+const REFORMAT_TITLE_PROMPT = `Você é um assistente de product management. Dado um título de issue escrito informalmente, reescreva-o de forma clara, concisa e profissional.
+
+Regras:
+- Máximo 60 caracteres
+- Use capitalização de título (Title Case em português: capitalize substantivos e verbos principais)
+- Seja descritivo mas direto
+- Não adicione prefixos como "feat:", "fix:", "chore:"
+- Retorne APENAS o título reformatado, nada mais — sem explicação, sem markdown, sem aspas`;
+
 const CLASSIFY_PROMPT = `Você é um product manager. Dado o título de uma issue e contexto do projeto, classifique a issue retornando APENAS um JSON válido (sem markdown, sem code blocks, sem explicação):
 
 {
@@ -383,6 +410,19 @@ Foque no impacto pro usuário/sistema, não nos detalhes técnicos. Seja direto.
     return result.response.text().trim() || null;
   } catch {
     return null;
+  }
+}
+
+export async function reformatIssueTitle(rawTitle: string): Promise<string> {
+  if (!genAI) return rawTitle;
+
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.1-pro-preview' });
+    const prompt = `${REFORMAT_TITLE_PROMPT}\n\nTítulo original: ${rawTitle}`;
+    const result = await model.generateContent(prompt);
+    return sanitizeAiTitle(result.response.text(), rawTitle);
+  } catch {
+    return rawTitle;
   }
 }
 
