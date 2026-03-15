@@ -396,6 +396,8 @@ function setupWebhookRoutes() {
     try {
       const { type, data, action } = req.body;
 
+      ctx.logger.info(`[linear-webhook] received type=${type} action=${action}`);
+
       if (type !== 'Issue') return;
 
       const teamKey = data?.team?.key;
@@ -472,6 +474,7 @@ function setupWebhookRoutes() {
       }
 
       await devChannel.send({ embeds: [embed] });
+      ctx.logger.info(`[linear-webhook] processed: ${action} ${data?.identifier || '?'} → ${statusName} (project: ${project.name})`);
     } catch (error) {
       ctx.logger.error('Linear webhook error:', error);
     }

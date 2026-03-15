@@ -105,6 +105,7 @@ function setupWebhookRoutes() {
     res.status(200).json({ ok: true });
 
     try {
+      ctx.logger.info(`[github-webhook] received event=${event} repo=${req.body?.repository?.full_name || '?'}`);
       await handleGitHubEvent(event, req.body);
     } catch (error) {
       ctx.logger.error('GitHub webhook error:', error);
@@ -200,5 +201,6 @@ async function handleGitHubEvent(event: string, payload: any) {
 
   if (embed) {
     await devChannel.send({ embeds: [embed] });
+    ctx.logger.info(`[github-webhook] processed: event=${event} repo=${repoFullName} project=${project.name}`);
   }
 }
