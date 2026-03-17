@@ -27,6 +27,9 @@ export const config = {
     apiKey: process.env['LINEAR_API_KEY'] || '',
     webhookSecret: process.env['LINEAR_WEBHOOK_SECRET'] || '',
   },
+  google: {
+    placesApiKey: process.env['GOOGLE_PLACES_API_KEY'] || '',
+  },
   deploy: {
     webhookSecret: process.env['DEPLOY_WEBHOOK_SECRET'] || '',
   },

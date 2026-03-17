@@ -60,6 +60,36 @@ export function createTestDb(): Database.Database {
       risk_level TEXT,
       deployed_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS leads_search_configs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      query TEXT NOT NULL,
+      region TEXT NOT NULL,
+      radius_km INTEGER DEFAULT 10,
+      min_score INTEGER DEFAULT 5,
+      active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS leads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      place_id TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      address TEXT,
+      phone TEXT,
+      website TEXT,
+      rating REAL,
+      review_count INTEGER DEFAULT 0,
+      category TEXT,
+      region TEXT,
+      score INTEGER DEFAULT 0,
+      recommended_service TEXT,
+      ai_analysis TEXT,
+      ai_pitch TEXT,
+      status TEXT DEFAULT 'new',
+      found_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      contacted_at DATETIME
+    );
   `);
 
   return db;
