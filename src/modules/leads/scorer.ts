@@ -1,4 +1,4 @@
-import type { PlaceResult, ScoreResult } from './types';
+import type { PlaceResult, ScoreResult, Lead } from './types';
 
 interface Signal {
   name: string;
@@ -34,6 +34,23 @@ export function scoreLead(lead: PlaceResult): ScoreResult {
   const recommended_service = recommendService(lead, signals, total);
 
   return { total, signals, recommended_service };
+}
+
+export function scoreLeadFromDb(lead: Lead): ScoreResult {
+  const asPlace: PlaceResult = {
+    place_id: lead.place_id,
+    name: lead.name,
+    address: lead.address,
+    phone: lead.phone,
+    website: lead.website,
+    google_maps_url: lead.google_maps_url,
+    photo_url: lead.photo_url,
+    rating: lead.rating,
+    review_count: lead.review_count,
+    category: lead.category,
+    reviews: [],
+  };
+  return scoreLead(asPlace);
 }
 
 export function applyWebsiteCheck(base: ScoreResult, websiteSignals: string[], adjustment: number): ScoreResult {

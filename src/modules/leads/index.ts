@@ -7,8 +7,8 @@ import {
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { BotModule, ModuleContext, CronJob } from '../../types';
 import type { Lead, LeadSearchConfig } from './types';
-import { searchPlaces, getPhotoUrl } from './places-api';
-import { scoreLead } from './scorer';
+import { searchPlaces, getPhotoUrl, searchNearby } from './places-api';
+import { scoreLead, scoreLeadFromDb } from './scorer';
 import { enrichLead } from './ai-enrichment';
 import { logApiUsage, getCostEntries, formatCostSummary } from './cost-tracker';
 
@@ -159,6 +159,33 @@ async function runProspecting(): Promise<void> {
   ctx.logger.info(`Prospecting complete: ${totalNew} new leads above threshold`);
 }
 
+async function runRescoring(): Promise<void> {
+  const leads = ctx.db
+    .prepare("SELECT * FROM leads WHERE status = 'new'")
+    .all() as Lead[];
+
+  if (leads.length === 0) {
+    ctx.logger.info('No leads to re-score');
+    return;
+  }
+
+  let updated = 0;
+
+  for (const lead of leads) {
+    const newScore = scoreLeadFromDb(lead);
+
+    if (newScore.total !== lead.score || newScore.recommended_service !== lead.recommended_service) {
+      ctx.db.prepare(
+        'UPDATE leads SET score = ?, recommended_service = ? WHERE id = ?'
+      ).run(newScore.total, newScore.recommended_service, lead.id);
+      updated++;
+      ctx.logger.info(`Re-scored lead #${lead.id} (${lead.name}): ${lead.score} → ${newScore.total}`);
+    }
+  }
+
+  ctx.logger.info(`Re-scoring complete: ${updated}/${leads.length} leads updated`);
+}
+
 const leadsCommand = new SlashCommandBuilder()
   .setName('leads')
   .setDescription('Lead prospecting management')
@@ -171,6 +198,23 @@ const leadsCommand = new SlashCommandBuilder()
       )
       .addStringOption((opt) =>
         opt.setName('region').setDescription('Region (e.g. "São Paulo, SP")').setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('nearby')
+      .setDescription('Search by coordinates + radius')
+      .addNumberOption((opt) =>
+        opt.setName('lat').setDescription('Latitude (e.g. -23.5505)').setRequired(true)
+      )
+      .addNumberOption((opt) =>
+        opt.setName('lng').setDescription('Longitude (e.g. -46.6333)').setRequired(true)
+      )
+      .addIntegerOption((opt) =>
+        opt.setName('radius').setDescription('Radius in km (default: 5)')
+      )
+      .addStringOption((opt) =>
+        opt.setName('types').setDescription('Place types comma-separated (e.g. restaurant,dentist)')
       )
   )
   .addSubcommandGroup((group) =>
@@ -243,6 +287,11 @@ export const leadsModule: BotModule = {
       schedule: '0 11 * * *',
       handler: runProspecting,
     },
+    {
+      name: 'weekly-rescore',
+      schedule: '0 14 * * 1', // Monday 11am BRT = 14 UTC
+      handler: runRescoring,
+    },
   ],
 
   async onLoad(context: ModuleContext): Promise<void> {
@@ -260,6 +309,8 @@ export const leadsModule: BotModule = {
 
     if (sub === 'search') {
       await handleSearch(interaction);
+    } else if (sub === 'nearby') {
+      await handleNearby(interaction);
     } else if (group === 'config') {
       if (sub === 'add') await handleConfigAdd(interaction);
       else if (sub === 'list') await handleConfigList(interaction);

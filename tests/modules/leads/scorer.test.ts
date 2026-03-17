@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { scoreLead, applyWebsiteCheck } from '../../../src/modules/leads/scorer';
-import type { PlaceResult } from '../../../src/modules/leads/types';
+import { scoreLead, applyWebsiteCheck, scoreLeadFromDb } from '../../../src/modules/leads/scorer';
+import type { PlaceResult, Lead } from '../../../src/modules/leads/types';
 
 function makeLead(overrides: Partial<PlaceResult> = {}): PlaceResult {
   return {
@@ -112,5 +112,55 @@ describe('applyWebsiteCheck', () => {
     const base = { total: 0, signals: [], recommended_service: 'none' };
     const result = applyWebsiteCheck(base, [], 0);
     expect(result.recommended_service).toBe('none');
+  });
+});
+
+describe('scoreLeadFromDb', () => {
+  function makeDbLead(overrides: Partial<Lead> = {}): Lead {
+    return {
+      id: 1,
+      place_id: 'test-1',
+      name: 'Test Business',
+      address: 'Rua Test, 123',
+      phone: '+5511999999999',
+      website: 'https://example.com',
+      rating: 4.0,
+      review_count: 50,
+      category: 'restaurant',
+      google_maps_url: 'https://maps.google.com/?cid=123',
+      photo_url: null,
+      region: 'São Paulo',
+      score: 0,
+      recommended_service: 'none',
+      ai_analysis: null,
+      ai_pitch: null,
+      status: 'new',
+      found_at: new Date().toISOString(),
+      contacted_at: null,
+      ...overrides,
+    };
+  }
+
+  it('re-scores a lead from DB data', () => {
+    const lead = makeDbLead({ website: null, rating: 4.5, review_count: 100 });
+    const result = scoreLeadFromDb(lead);
+    expect(result.total).toBeGreaterThanOrEqual(7);
+    expect(result.signals).toContain('no_website');
+    expect(result.recommended_service).toBe('vibe-web Essential Landing');
+  });
+
+  it('returns score 0 and none for healthy lead', () => {
+    const lead = makeDbLead();
+    const result = scoreLeadFromDb(lead);
+    expect(result.total).toBe(0);
+    expect(result.recommended_service).toBe('none');
+  });
+
+  it('detects score change when lead loses website', () => {
+    const withSite = makeDbLead({ score: 0 });
+    const withoutSite = makeDbLead({ website: null, score: 0 });
+    const scoreWith = scoreLeadFromDb(withSite);
+    const scoreWithout = scoreLeadFromDb(withoutSite);
+    expect(scoreWithout.total).toBeGreaterThan(scoreWith.total);
   });
 });
