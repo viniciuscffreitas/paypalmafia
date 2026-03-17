@@ -6,9 +6,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { BotModule, ModuleContext } from '../../types';
 import type { Lead, LeadSearchConfig } from './types';
 import { searchPlaces } from './places-api';
-import { scoreLead, scoreLeadFromDb } from './scorer';
+import { scoreLead, scoreLeadFromDb, applyWebsiteCheck } from './scorer';
 import { enrichLead } from './ai-enrichment';
 import { logApiUsage } from './cost-tracker';
+import { checkWebsite } from './website-checker';
 import {
   setHandlerContext,
   buildLeadEmbed,
@@ -64,7 +65,17 @@ async function runProspecting(): Promise<void> {
         .get(place.place_id);
       if (existing) continue;
 
-      const score = scoreLead(place);
+      ctx.logger.info(`Processing: ${place.name} | reviews: ${place.reviews.length} | website: ${place.website || 'none'}`);
+
+      let score = scoreLead(place);
+
+      if (place.website && score.total > 0) {
+        const websiteCheck = await checkWebsite(place.website);
+        if (websiteCheck.signals.length > 0) {
+          ctx.logger.info(`Website check for ${place.name}: ${websiteCheck.signals.join(', ')} (+${websiteCheck.score_adjustment})`);
+          score = applyWebsiteCheck(score, websiteCheck.signals, websiteCheck.score_adjustment);
+        }
+      }
 
       const result = ctx.db.prepare(`
         INSERT INTO leads (place_id, name, address, phone, website, google_maps_url, photo_url, rating, review_count, category, region, score, recommended_service)

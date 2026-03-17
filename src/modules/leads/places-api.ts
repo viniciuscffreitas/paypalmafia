@@ -150,10 +150,13 @@ export async function searchPlaces(
       allResults.push(...results);
 
       const nextToken = parseNextPageToken(data);
-      if (!nextToken) break;
+      if (!nextToken) {
+        logger.info(`Page ${page + 1}: ${results.length} places — no more pages available`);
+        break;
+      }
 
       pageToken = nextToken;
-      logger.info(`Page ${page + 1}: ${results.length} places, fetching next page...`);
+      logger.info(`Page ${page + 1}: ${results.length} places, nextPageToken present — fetching next page...`);
 
       await new Promise((r) => setTimeout(r, 300));
     } catch (error) {

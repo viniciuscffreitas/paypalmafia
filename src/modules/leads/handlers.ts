@@ -7,9 +7,13 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { ModuleContext } from '../../types';
 import type { Lead, LeadSearchConfig } from './types';
 import { searchPlaces, getPhotoUrl, searchNearby } from './places-api';
-import { scoreLead } from './scorer';
+import { scoreLead, applyWebsiteCheck } from './scorer';
 import { enrichLead } from './ai-enrichment';
 import { logApiUsage, getCostEntries, formatCostSummary } from './cost-tracker';
+import { checkWebsite } from './website-checker';
+import { createLogger } from '../../core/logger';
+
+const logger = createLogger('leads:handlers');
 
 let ctx: ModuleContext;
 
@@ -120,7 +124,18 @@ export async function handleSearch(interaction: ChatInputCommandInteraction): Pr
       .get(place.place_id);
     if (existing) continue;
 
-    const score = scoreLead(place);
+    logger.info(`Processing: ${place.name} | reviews: ${place.reviews.length} | website: ${place.website || 'none'}`);
+
+    let score = scoreLead(place);
+
+    // Website check for leads that have a website and some score signals
+    if (place.website && score.total > 0) {
+      const websiteCheck = await checkWebsite(place.website);
+      if (websiteCheck.signals.length > 0) {
+        logger.info(`Website check for ${place.name}: ${websiteCheck.signals.join(', ')} (+${websiteCheck.score_adjustment})`);
+        score = applyWebsiteCheck(score, websiteCheck.signals, websiteCheck.score_adjustment);
+      }
+    }
 
     const result = ctx.db.prepare(`
       INSERT INTO leads (place_id, name, address, phone, website, google_maps_url, rating, review_count, category, region, score, recommended_service)
@@ -206,7 +221,17 @@ export async function handleNearby(interaction: ChatInputCommandInteraction): Pr
       .get(place.place_id);
     if (existing) continue;
 
-    const score = scoreLead(place);
+    logger.info(`Processing: ${place.name} | reviews: ${place.reviews.length} | website: ${place.website || 'none'}`);
+
+    let score = scoreLead(place);
+
+    if (place.website && score.total > 0) {
+      const websiteCheck = await checkWebsite(place.website);
+      if (websiteCheck.signals.length > 0) {
+        logger.info(`Website check for ${place.name}: ${websiteCheck.signals.join(', ')} (+${websiteCheck.score_adjustment})`);
+        score = applyWebsiteCheck(score, websiteCheck.signals, websiteCheck.score_adjustment);
+      }
+    }
 
     const result = ctx.db.prepare(`
       INSERT INTO leads (place_id, name, address, phone, website, google_maps_url, photo_url, rating, review_count, category, region, score, recommended_service)
