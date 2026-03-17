@@ -10,6 +10,7 @@ function makeLead(overrides: Partial<PlaceResult> = {}): PlaceResult {
     phone: '+5511999999999',
     website: 'https://example.com',
     google_maps_url: 'https://maps.google.com/?cid=123',
+    photo_url: null,
     rating: 4.0,
     review_count: 50,
     category: 'restaurant',

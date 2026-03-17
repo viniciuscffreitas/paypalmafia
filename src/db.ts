@@ -142,6 +142,12 @@ function runMigrations(db: Database.Database): void {
         ALTER TABLE leads ADD COLUMN google_maps_url TEXT;
       `,
     },
+    {
+      name: '008_leads_photo_url',
+      sql: `
+        ALTER TABLE leads ADD COLUMN photo_url TEXT;
+      `,
+    },
   ];
 
   const applied = new Set(

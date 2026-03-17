@@ -15,6 +15,11 @@ describe('parsePlacesResponse', () => {
           userRatingCount: 120,
           primaryTypeDisplayName: { text: 'Restaurante' },
           googleMapsUri: 'https://maps.google.com/?cid=123456',
+          businessStatus: 'OPERATIONAL',
+          photos: [
+            { name: 'places/ChIJ123/photos/abc123', heightPx: 400, widthPx: 600 },
+            { name: 'places/ChIJ123/photos/def456', heightPx: 300, widthPx: 400 },
+          ],
         },
       ],
     };
@@ -28,6 +33,7 @@ describe('parsePlacesResponse', () => {
       phone: '(11) 3000-0000',
       website: 'https://restaurantebom.com.br',
       google_maps_url: 'https://maps.google.com/?cid=123456',
+      photo_url: 'places/ChIJ123/photos/abc123',
       rating: 4.5,
       review_count: 120,
       category: 'Restaurante',
@@ -52,6 +58,7 @@ describe('parsePlacesResponse', () => {
     expect(results[0].review_count).toBe(0);
     expect(results[0].category).toBeNull();
     expect(results[0].google_maps_url).toBeNull();
+    expect(results[0].photo_url).toBeNull();
   });
 
   it('returns empty array for empty response', () => {
@@ -94,6 +101,21 @@ describe('parsePlacesResponse', () => {
     };
     const results = parsePlacesResponse(apiResponse);
     expect(results).toHaveLength(0);
+  });
+
+  it('sets photo_url to null when no photos', () => {
+    const apiResponse = {
+      places: [
+        {
+          id: 'no-photo',
+          displayName: { text: 'No Photo Place' },
+          formattedAddress: 'Rua X',
+          businessStatus: 'OPERATIONAL',
+        },
+      ],
+    };
+    const results = parsePlacesResponse(apiResponse);
+    expect(results[0].photo_url).toBeNull();
   });
 
   it('includes places with no businessStatus (defaults to operational)', () => {

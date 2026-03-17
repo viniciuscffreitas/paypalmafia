@@ -7,7 +7,7 @@ import {
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { BotModule, ModuleContext, CronJob } from '../../types';
 import type { Lead, LeadSearchConfig } from './types';
-import { searchPlaces } from './places-api';
+import { searchPlaces, getPhotoUrl } from './places-api';
 import { scoreLead } from './scorer';
 import { enrichLead } from './ai-enrichment';
 
@@ -30,9 +30,10 @@ export interface LeadEmbedData {
   color: number;
   fields: { name: string; value: string }[];
   footer: string;
+  thumbnail: string | null;
 }
 
-export function buildLeadEmbedData(lead: Lead): LeadEmbedData {
+export function buildLeadEmbedData(lead: Lead, apiKey?: string): LeadEmbedData {
   const color = lead.score >= 10 ? 0xff6b6b : lead.score >= 7 ? 0xf2c94c : 0x5865f2;
 
   const mapsUrl = lead.google_maps_url || `https://www.google.com/maps/place/?q=place_id:${lead.place_id}`;
@@ -57,17 +58,24 @@ export function buildLeadEmbedData(lead: Lead): LeadEmbedData {
     color,
     fields,
     footer: `ID: ${lead.id} | /leads status ${lead.id} contacted|dismissed`,
+    thumbnail: lead.photo_url && apiKey
+      ? getPhotoUrl(lead.photo_url, apiKey)
+      : null,
   };
 }
 
 function buildLeadEmbed(lead: Lead): EmbedBuilder {
-  const data = buildLeadEmbedData(lead);
+  const data = buildLeadEmbedData(lead, process.env['GOOGLE_PLACES_API_KEY']);
   const embed = new EmbedBuilder()
     .setTitle(data.title)
     .setColor(data.color)
     .setDescription(data.description)
     .setTimestamp(new Date(lead.found_at))
     .setFooter({ text: data.footer });
+
+  if (data.thumbnail) {
+    embed.setThumbnail(data.thumbnail);
+  }
 
   for (const field of data.fields) {
     embed.addFields(field);
@@ -116,11 +124,11 @@ async function runProspecting(): Promise<void> {
       const score = scoreLead(place);
 
       const result = ctx.db.prepare(`
-        INSERT INTO leads (place_id, name, address, phone, website, google_maps_url, rating, review_count, category, region, score, recommended_service)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO leads (place_id, name, address, phone, website, google_maps_url, photo_url, rating, review_count, category, region, score, recommended_service)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         place.place_id, place.name, place.address, place.phone, place.website,
-        place.google_maps_url, place.rating, place.review_count, place.category, cfg.region,
+        place.google_maps_url, place.photo_url, place.rating, place.review_count, place.category, cfg.region,
         score.total, score.recommended_service,
       );
 

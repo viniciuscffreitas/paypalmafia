@@ -14,6 +14,7 @@ function makeLead(overrides: Partial<Lead> = {}): Lead {
     review_count: 50,
     category: 'restaurant',
     google_maps_url: 'https://maps.google.com/?cid=123',
+    photo_url: null,
     region: 'São Paulo',
     score: 6,
     recommended_service: 'vibe-web Brand Authority',
@@ -68,5 +69,20 @@ describe('buildLeadEmbedData', () => {
   it('uses blue color for score < 7', () => {
     const data = buildLeadEmbedData(makeLead({ score: 3 }));
     expect(data.color).toBe(0x5865f2);
+  });
+
+  it('returns null thumbnail when photo_url is null', () => {
+    const data = buildLeadEmbedData(makeLead({ photo_url: null }));
+    expect(data.thumbnail).toBeNull();
+  });
+
+  it('returns null thumbnail when no apiKey provided', () => {
+    const data = buildLeadEmbedData(makeLead({ photo_url: 'places/123/photos/abc' }));
+    expect(data.thumbnail).toBeNull();
+  });
+
+  it('returns photo URL when photo_url and apiKey are provided', () => {
+    const data = buildLeadEmbedData(makeLead({ photo_url: 'places/123/photos/abc' }), 'test-key');
+    expect(data.thumbnail).toBe('https://places.googleapis.com/v1/places/123/photos/abc/media?maxHeightPx=400&key=test-key');
   });
 });

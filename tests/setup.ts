@@ -79,6 +79,7 @@ export function createTestDb(): Database.Database {
       phone TEXT,
       website TEXT,
       google_maps_url TEXT,
+      photo_url TEXT,
       rating REAL,
       review_count INTEGER DEFAULT 0,
       category TEXT,

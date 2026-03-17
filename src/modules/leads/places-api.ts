@@ -16,6 +16,7 @@ const FIELD_MASK = [
   'places.primaryTypeDisplayName',
   'places.googleMapsUri',
   'places.businessStatus',
+  'places.photos',
 ].join(',');
 
 export function parsePlacesResponse(data: any): PlaceResult[] {
@@ -34,10 +35,15 @@ export function parsePlacesResponse(data: any): PlaceResult[] {
     phone: p.nationalPhoneNumber ?? null,
     website: p.websiteUri ?? null,
     google_maps_url: p.googleMapsUri ?? null,
+    photo_url: p.photos?.[0]?.name ?? null,
     rating: p.rating ?? null,
     review_count: p.userRatingCount ?? 0,
     category: p.primaryTypeDisplayName?.text ?? null,
     }));
+}
+
+export function getPhotoUrl(photoName: string, apiKey: string, maxHeight: number = 400): string {
+  return `https://places.googleapis.com/v1/${photoName}/media?maxHeightPx=${maxHeight}&key=${apiKey}`;
 }
 
 export function parseNextPageToken(data: any): string | null {
