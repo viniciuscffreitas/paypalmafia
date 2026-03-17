@@ -19,6 +19,7 @@ import { decisionsModule } from './modules/decisions';
 import { focusModule } from './modules/focus';
 import { autoBookmarkModule } from './modules/auto-bookmark';
 import { deployModule } from './modules/deploy';
+import { leadsModule } from './modules/leads';
 
 const logger = createLogger('bot');
 
@@ -54,6 +55,7 @@ async function main(): Promise<void> {
     focusModule,
     autoBookmarkModule,
     deployModule,
+    leadsModule,
   ];
 
   for (const mod of modules) {
