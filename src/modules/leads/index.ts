@@ -10,7 +10,6 @@ import type { Lead, LeadSearchConfig } from './types';
 import { searchPlaces } from './places-api';
 import { scoreLead } from './scorer';
 import { enrichLead } from './ai-enrichment';
-import { config } from '../../config';
 
 let ctx: ModuleContext;
 
@@ -83,7 +82,7 @@ async function runProspecting(): Promise<void> {
     return;
   }
 
-  if (!config.google.placesApiKey) {
+  if (!process.env['GOOGLE_PLACES_API_KEY']) {
     ctx.logger.warn('GOOGLE_PLACES_API_KEY not set — skipping prospecting');
     return;
   }
@@ -99,7 +98,7 @@ async function runProspecting(): Promise<void> {
     ctx.logger.info(`Prospecting: "${cfg.query}" in "${cfg.region}"`);
 
     const places = await searchPlaces(
-      config.google.placesApiKey,
+      process.env['GOOGLE_PLACES_API_KEY'],
       cfg.query,
       cfg.region,
     );
@@ -256,14 +255,14 @@ async function handleSearch(interaction: ChatInputCommandInteraction): Promise<v
   const query = interaction.options.getString('query', true);
   const region = interaction.options.getString('region', true);
 
-  if (!config.google.placesApiKey) {
+  if (!process.env['GOOGLE_PLACES_API_KEY']) {
     await interaction.reply({ content: 'GOOGLE_PLACES_API_KEY não configurada.', ephemeral: true });
     return;
   }
 
   await interaction.deferReply();
 
-  const places = await searchPlaces(config.google.placesApiKey, query, region);
+  const places = await searchPlaces(process.env['GOOGLE_PLACES_API_KEY'], query, region);
 
   if (places.length === 0) {
     await interaction.editReply('Nenhum resultado encontrado.');
