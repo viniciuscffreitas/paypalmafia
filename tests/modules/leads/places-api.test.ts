@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePlacesResponse, parseNextPageToken } from '../../../src/modules/leads/places-api';
+import { parsePlacesResponse, parseNextPageToken, parseNearbySearchBody } from '../../../src/modules/leads/places-api';
 
 describe('parsePlacesResponse', () => {
   it('parses a valid Places API response into PlaceResult[]', () => {
@@ -160,6 +160,23 @@ describe('parsePlacesResponse', () => {
     };
     const results = parsePlacesResponse(apiResponse);
     expect(results[0].reviews).toEqual([]);
+  });
+});
+
+describe('parseNearbySearchBody', () => {
+  it('builds correct request body with coordinates and radius', () => {
+    const body = parseNearbySearchBody(-23.5505, -46.6333, 5, ['restaurant']);
+    expect(body.locationRestriction.circle.center.latitude).toBe(-23.5505);
+    expect(body.locationRestriction.circle.center.longitude).toBe(-46.6333);
+    expect(body.locationRestriction.circle.radius).toBe(5000);
+    expect(body.includedTypes).toEqual(['restaurant']);
+    expect(body.languageCode).toBe('pt-BR');
+    expect(body.maxResultCount).toBe(20);
+  });
+
+  it('converts km to meters for radius', () => {
+    const body = parseNearbySearchBody(0, 0, 10, []);
+    expect(body.locationRestriction.circle.radius).toBe(10000);
   });
 });
 

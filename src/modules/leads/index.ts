@@ -1,89 +1,30 @@
 import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
-  EmbedBuilder,
-  TextChannel,
 } from 'discord.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import type { BotModule, ModuleContext, CronJob } from '../../types';
+import type { BotModule, ModuleContext } from '../../types';
 import type { Lead, LeadSearchConfig } from './types';
-import { searchPlaces, getPhotoUrl, searchNearby } from './places-api';
+import { searchPlaces } from './places-api';
 import { scoreLead, scoreLeadFromDb } from './scorer';
 import { enrichLead } from './ai-enrichment';
-import { logApiUsage, getCostEntries, formatCostSummary } from './cost-tracker';
+import { logApiUsage } from './cost-tracker';
+import {
+  setHandlerContext,
+  buildLeadEmbed,
+  handleSearch,
+  handleNearby,
+  handleConfigAdd,
+  handleConfigList,
+  handleConfigRemove,
+  handleCost,
+  handleStats,
+  handleStatusUpdate,
+} from './handlers';
+
+export { buildLeadEmbedData, type LeadEmbedData } from './handlers';
 
 let ctx: ModuleContext;
-
-const LEADS_CHANNEL_NAME = 'leads';
-
-async function findLeadsChannel(): Promise<TextChannel | null> {
-  const guild = ctx.client.guilds.cache.first();
-  if (!guild) return null;
-  const channel = guild.channels.cache.find(
-    (c) => c.name === LEADS_CHANNEL_NAME && c.isTextBased()
-  ) as TextChannel | undefined;
-  return channel ?? null;
-}
-
-export interface LeadEmbedData {
-  title: string;
-  description: string;
-  color: number;
-  fields: { name: string; value: string }[];
-  footer: string;
-  thumbnail: string | null;
-}
-
-export function buildLeadEmbedData(lead: Lead, apiKey?: string): LeadEmbedData {
-  const color = lead.score >= 10 ? 0xff6b6b : lead.score >= 7 ? 0xf2c94c : 0x5865f2;
-
-  const mapsUrl = lead.google_maps_url || `https://www.google.com/maps/place/?q=place_id:${lead.place_id}`;
-
-  const lines: string[] = [];
-  if (lead.category) lines.push(`🏷️ ${lead.category}`);
-  if (lead.address) lines.push(`📍 ${lead.address}`);
-  if (lead.rating !== null) lines.push(`⭐ ${lead.rating} (${lead.review_count} avaliações)`);
-  if (lead.website) lines.push(`🌐 [Website](${lead.website})`);
-  else lines.push('🌐 **Sem website**');
-  if (lead.phone) lines.push(`📞 ${lead.phone}`);
-  lines.push(`🗺️ [Ver no Google Maps](${mapsUrl})`);
-  lines.push(`\n🎯 Score: **${lead.score}** | Serviço: **${lead.recommended_service}**`);
-
-  const fields: { name: string; value: string }[] = [];
-  if (lead.ai_analysis) fields.push({ name: '💡 Análise', value: lead.ai_analysis });
-  if (lead.ai_pitch) fields.push({ name: '📝 Pitch', value: lead.ai_pitch });
-
-  return {
-    title: lead.name,
-    description: lines.join('\n'),
-    color,
-    fields,
-    footer: `ID: ${lead.id} | /leads status ${lead.id} contacted|dismissed`,
-    thumbnail: lead.photo_url && apiKey
-      ? getPhotoUrl(lead.photo_url, apiKey)
-      : null,
-  };
-}
-
-function buildLeadEmbed(lead: Lead): EmbedBuilder {
-  const data = buildLeadEmbedData(lead, process.env['GOOGLE_PLACES_API_KEY']);
-  const embed = new EmbedBuilder()
-    .setTitle(data.title)
-    .setColor(data.color)
-    .setDescription(data.description)
-    .setTimestamp(new Date(lead.found_at))
-    .setFooter({ text: data.footer });
-
-  if (data.thumbnail) {
-    embed.setThumbnail(data.thumbnail);
-  }
-
-  for (const field of data.fields) {
-    embed.addFields(field);
-  }
-
-  return embed;
-}
 
 async function runProspecting(): Promise<void> {
   const configs = ctx.db
@@ -100,7 +41,6 @@ async function runProspecting(): Promise<void> {
     return;
   }
 
-  const leadsChannel = await findLeadsChannel();
   const genAI = process.env['GEMINI_API_KEY']
     ? new GoogleGenerativeAI(process.env['GEMINI_API_KEY']!)
     : null;
@@ -145,11 +85,15 @@ async function runProspecting(): Promise<void> {
         }
       }
 
-      if (score.total >= cfg.min_score && leadsChannel) {
+      if (score.total >= cfg.min_score) {
         const lead = ctx.db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId) as Lead;
-        const embed = buildLeadEmbed(lead);
-        await leadsChannel.send({ embeds: [embed] });
-        totalNew++;
+        const { findLeadsChannel } = await import('./handlers');
+        const leadsChannel = await findLeadsChannel();
+        if (leadsChannel) {
+          const embed = buildLeadEmbed(lead);
+          await leadsChannel.send({ embeds: [embed] });
+          totalNew++;
+        }
       }
 
       await new Promise((r) => setTimeout(r, 200));
@@ -296,6 +240,7 @@ export const leadsModule: BotModule = {
 
   async onLoad(context: ModuleContext): Promise<void> {
     ctx = context;
+    setHandlerContext(context);
     ctx.logger.info('Leads module loaded');
   },
 
@@ -324,200 +269,3 @@ export const leadsModule: BotModule = {
     }
   },
 };
-
-async function handleSearch(interaction: ChatInputCommandInteraction): Promise<void> {
-  const query = interaction.options.getString('query', true);
-  const region = interaction.options.getString('region', true);
-
-  if (!process.env['GOOGLE_PLACES_API_KEY']) {
-    await interaction.reply({ content: 'GOOGLE_PLACES_API_KEY não configurada.', ephemeral: true });
-    return;
-  }
-
-  await interaction.deferReply();
-
-  const places = await searchPlaces(process.env['GOOGLE_PLACES_API_KEY'], query, region);
-
-  logApiUsage(ctx.db, 'textSearch', places.length, Math.ceil(places.length / 20));
-
-  if (places.length === 0) {
-    await interaction.editReply('Nenhum resultado encontrado.');
-    return;
-  }
-
-  const genAI = process.env['GEMINI_API_KEY']
-    ? new GoogleGenerativeAI(process.env['GEMINI_API_KEY']!)
-    : null;
-
-  const results: Lead[] = [];
-
-  for (const place of places) {
-    const existing = ctx.db
-      .prepare('SELECT id FROM leads WHERE place_id = ?')
-      .get(place.place_id);
-    if (existing) continue;
-
-    const score = scoreLead(place);
-
-    const result = ctx.db.prepare(`
-      INSERT INTO leads (place_id, name, address, phone, website, google_maps_url, rating, review_count, category, region, score, recommended_service)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      place.place_id, place.name, place.address, place.phone, place.website,
-      place.google_maps_url, place.rating, place.review_count, place.category, region,
-      score.total, score.recommended_service,
-    );
-
-    const leadId = result.lastInsertRowid as number;
-
-    if (score.total >= 5 && genAI) {
-      const enrichment = await enrichLead(genAI, place, score);
-      if (enrichment) {
-        ctx.db.prepare('UPDATE leads SET ai_analysis = ?, ai_pitch = ? WHERE id = ?')
-          .run(enrichment.analysis, enrichment.pitch, leadId);
-      }
-    }
-
-    results.push(
-      ctx.db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId) as Lead
-    );
-
-    await new Promise((r) => setTimeout(r, 200));
-  }
-
-  const embed = new EmbedBuilder()
-    .setTitle(`Busca: "${query}" em ${region}`)
-    .setColor(0x5865f2)
-    .setDescription(
-      results.length === 0
-        ? 'Todos os resultados já estavam no banco.'
-        : results
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 10)
-            .map((l) => `**${l.name}** — Score: ${l.score} | ${l.recommended_service}`)
-            .join('\n')
-    )
-    .setFooter({ text: `${results.length} novos leads encontrados` });
-
-  await interaction.editReply({ embeds: [embed] });
-
-  const leadsChannel = await findLeadsChannel();
-  if (leadsChannel) {
-    for (const lead of results.filter((l) => l.score >= 5)) {
-      await leadsChannel.send({ embeds: [buildLeadEmbed(lead)] });
-    }
-  }
-}
-
-async function handleConfigAdd(interaction: ChatInputCommandInteraction): Promise<void> {
-  const query = interaction.options.getString('query', true);
-  const region = interaction.options.getString('region', true);
-  const minScore = interaction.options.getInteger('min_score') ?? 5;
-
-  const result = ctx.db.prepare(
-    'INSERT INTO leads_search_configs (query, region, min_score) VALUES (?, ?, ?)'
-  ).run(query, region, minScore);
-
-  await interaction.reply(
-    `✅ Config #${result.lastInsertRowid} criada: "${query}" em ${region} (min score: ${minScore})`
-  );
-}
-
-async function handleConfigList(interaction: ChatInputCommandInteraction): Promise<void> {
-  const configs = ctx.db
-    .prepare('SELECT * FROM leads_search_configs ORDER BY id')
-    .all() as LeadSearchConfig[];
-
-  if (configs.length === 0) {
-    await interaction.reply({ content: 'Nenhuma config cadastrada. Use `/leads config add`.', ephemeral: true });
-    return;
-  }
-
-  const lines = configs.map((c) =>
-    `**#${c.id}** — "${c.query}" em ${c.region} | Min score: ${c.min_score} | ${c.active ? '🟢 Ativa' : '🔴 Inativa'}`
-  );
-
-  const embed = new EmbedBuilder()
-    .setTitle('Search Configs')
-    .setDescription(lines.join('\n'))
-    .setColor(0x5865f2);
-
-  await interaction.reply({ embeds: [embed] });
-}
-
-async function handleConfigRemove(interaction: ChatInputCommandInteraction): Promise<void> {
-  const id = interaction.options.getInteger('id', true);
-  const result = ctx.db.prepare('DELETE FROM leads_search_configs WHERE id = ?').run(id);
-
-  if (result.changes === 0) {
-    await interaction.reply({ content: `Config #${id} não encontrada.`, ephemeral: true });
-    return;
-  }
-
-  await interaction.reply(`🗑️ Config #${id} removida.`);
-}
-
-async function handleCost(interaction: ChatInputCommandInteraction): Promise<void> {
-  const days = interaction.options.getInteger('days') ?? 30;
-
-  const entries = getCostEntries(ctx.db, days);
-  const summary = formatCostSummary(entries);
-
-  const todayEntries = entries.filter(e =>
-    new Date(e.created_at).toDateString() === new Date().toDateString()
-  );
-  const todaySummary = formatCostSummary(todayEntries);
-
-  const embed = new EmbedBuilder()
-    .setTitle('💰 API Cost Estimate')
-    .setColor(0x5865f2)
-    .addFields(
-      { name: `Últimos ${days} dias`, value: `$${summary.total_cost.toFixed(2)} (${summary.total_places} places, ${summary.total_requests} buscas)`, inline: false },
-      { name: 'Hoje', value: `$${todaySummary.total_cost.toFixed(2)} (${todaySummary.total_places} places, ${todaySummary.total_requests} buscas)`, inline: false },
-    )
-    .setFooter({ text: 'Estimativa baseada em $0.035/place (Pro SKU)' });
-
-  await interaction.reply({ embeds: [embed] });
-}
-
-async function handleStats(interaction: ChatInputCommandInteraction): Promise<void> {
-  const total = (ctx.db.prepare('SELECT COUNT(*) as c FROM leads').get() as any).c;
-  const byStatus = ctx.db
-    .prepare('SELECT status, COUNT(*) as c FROM leads GROUP BY status')
-    .all() as { status: string; c: number }[];
-  const avgScore = (ctx.db.prepare('SELECT AVG(score) as avg FROM leads').get() as any).avg;
-  const topService = ctx.db
-    .prepare('SELECT recommended_service, COUNT(*) as c FROM leads GROUP BY recommended_service ORDER BY c DESC LIMIT 1')
-    .get() as { recommended_service: string; c: number } | undefined;
-
-  const statusLines = byStatus.map((s) => `${s.status}: ${s.c}`).join(' | ');
-
-  const embed = new EmbedBuilder()
-    .setTitle('📊 Lead Stats')
-    .setColor(0x5865f2)
-    .addFields(
-      { name: 'Total', value: `${total}`, inline: true },
-      { name: 'Score médio', value: `${(avgScore ?? 0).toFixed(1)}`, inline: true },
-      { name: 'Top serviço', value: topService?.recommended_service ?? 'N/A', inline: true },
-    )
-    .setDescription(statusLines || 'Sem leads ainda.');
-
-  await interaction.reply({ embeds: [embed] });
-}
-
-async function handleStatusUpdate(interaction: ChatInputCommandInteraction): Promise<void> {
-  const id = interaction.options.getInteger('id', true);
-  const newStatus = interaction.options.getString('new_status', true);
-
-  const lead = ctx.db.prepare('SELECT * FROM leads WHERE id = ?').get(id) as Lead | undefined;
-  if (!lead) {
-    await interaction.reply({ content: `Lead #${id} não encontrado.`, ephemeral: true });
-    return;
-  }
-
-  const contactedAt = newStatus === 'contacted' ? new Date().toISOString() : lead.contacted_at;
-  ctx.db.prepare('UPDATE leads SET status = ?, contacted_at = ? WHERE id = ?')
-    .run(newStatus, contactedAt, id);
-
-  await interaction.reply(`Lead **#${id}** (${lead.name}) → status: **${newStatus}**`);
-}

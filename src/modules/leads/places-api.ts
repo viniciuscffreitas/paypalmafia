@@ -4,6 +4,7 @@ import { createLogger } from '../../core/logger';
 const logger = createLogger('leads:places-api');
 
 const PLACES_API_BASE = 'https://places.googleapis.com/v1/places:searchText';
+const NEARBY_SEARCH_BASE = 'https://places.googleapis.com/v1/places:searchNearby';
 
 const FIELD_MASK = [
   'places.id',
@@ -50,6 +51,61 @@ export function getPhotoUrl(photoName: string, apiKey: string, maxHeight: number
 
 export function parseNextPageToken(data: any): string | null {
   return data?.nextPageToken ?? null;
+}
+
+export function parseNearbySearchBody(
+  lat: number,
+  lng: number,
+  radiusKm: number,
+  types: string[],
+): Record<string, any> {
+  return {
+    locationRestriction: {
+      circle: {
+        center: { latitude: lat, longitude: lng },
+        radius: radiusKm * 1000,
+      },
+    },
+    includedTypes: types,
+    maxResultCount: 20,
+    languageCode: 'pt-BR',
+  };
+}
+
+export async function searchNearby(
+  apiKey: string,
+  lat: number,
+  lng: number,
+  radiusKm: number,
+  types: string[],
+): Promise<PlaceResult[]> {
+  const body = parseNearbySearchBody(lat, lng, radiusKm, types);
+
+  try {
+    const response = await fetch(NEARBY_SEARCH_BASE, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': FIELD_MASK,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      logger.error(`Nearby Search error (${response.status}): ${error}`);
+      return [];
+    }
+
+    const data = await response.json();
+    const results = parsePlacesResponse(data);
+    logger.info(`Found ${results.length} nearby places (${lat}, ${lng}, ${radiusKm}km)`);
+    return results;
+  } catch (error) {
+    logger.error('Nearby Search request failed:', error);
+    return [];
+  }
 }
 
 export async function searchPlaces(
