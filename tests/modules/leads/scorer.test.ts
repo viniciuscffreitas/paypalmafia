@@ -25,6 +25,25 @@ describe('scoreLead', () => {
     expect(result.signals).toHaveLength(0);
   });
 
+  // Behavior Contract: score 0 = healthy lead, no recommendation
+  it('recommends "none" for a lead with score 0 (healthy digital presence)', () => {
+    const result = scoreLead(makeLead());
+    expect(result.total).toBe(0);
+    expect(result.recommended_service).toBe('none');
+  });
+
+  it('recommends "none" for high-volume established business with HTTPS website', () => {
+    const result = scoreLead(makeLead({ review_count: 200, rating: 4.8, website: 'https://ok.com' }));
+    expect(result.total).toBe(0);
+    expect(result.recommended_service).toBe('none');
+  });
+
+  it('recommends Brand Authority for lead with only few_reviews signal', () => {
+    const result = scoreLead(makeLead({ review_count: 5 }));
+    expect(result.signals).toContain('few_reviews');
+    expect(result.recommended_service).toBe('vibe-web Brand Authority');
+  });
+
   it('adds +4 for no website', () => {
     const result = scoreLead(makeLead({ website: null }));
     expect(result.total).toBeGreaterThanOrEqual(4);
@@ -71,8 +90,10 @@ describe('scoreLead', () => {
     expect(result.recommended_service).toBe('vibe-web Brand Authority');
   });
 
-  it('recommends vinicius.xyz Automation for high-volume established business with website', () => {
+  // This test previously expected 'vinicius.xyz Automation & Integration' but
+  // a lead with score 0 (no negative signals) should not get a service recommendation
+  it('recommends "none" for high-volume established business (regression from original bug)', () => {
     const result = scoreLead(makeLead({ review_count: 200, rating: 4.8, website: 'https://ok.com' }));
-    expect(result.recommended_service).toBe('vinicius.xyz Automation & Integration');
+    expect(result.recommended_service).toBe('none');
   });
 });

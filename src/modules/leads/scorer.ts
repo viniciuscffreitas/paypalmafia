@@ -15,15 +15,14 @@ const SIGNALS: Signal[] = [
   { name: 'established_no_website', points: 3, test: (l) => !l.website && l.review_count >= 50 },
 ];
 
-function recommendService(lead: PlaceResult, signals: string[]): string {
+function recommendService(lead: PlaceResult, signals: string[], score: number): string {
+  if (score === 0) return 'none';
+
   if (signals.includes('no_website')) {
     return 'vibe-web Essential Landing';
   }
   if (signals.includes('no_https')) {
     return 'vibe-web Brand Authority';
-  }
-  if (lead.review_count >= 100 && lead.rating !== null && lead.rating >= 4.0) {
-    return 'vinicius.xyz Automation & Integration';
   }
   return 'vibe-web Brand Authority';
 }
@@ -32,7 +31,7 @@ export function scoreLead(lead: PlaceResult): ScoreResult {
   const matched = SIGNALS.filter((s) => s.test(lead));
   const signals = matched.map((s) => s.name);
   const total = matched.reduce((sum, s) => sum + s.points, 0);
-  const recommended_service = recommendService(lead, signals);
+  const recommended_service = recommendService(lead, signals, total);
 
   return { total, signals, recommended_service };
 }
