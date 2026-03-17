@@ -14,10 +14,13 @@ Analise este estabelecimento como potencial cliente:
 - Site: ${place.website || 'nenhum'}
 - Sinais detectados: ${score.signals.join(', ')}
 - Serviço recomendado: ${score.recommended_service}
+${place.reviews.length > 0 ? `\nAvaliações recentes dos clientes:\n${place.reviews.map(r => `- "${r}"`).join('\n')}` : ''}
 
 Serviços que oferecemos:
 - vibe-web.com: Landing pages (€390+), sites multi-page com CMS (€490+), web apps/dashboards (€2,490+)
 - vinicius.xyz: MVPs, automação de processos, integrações CRM/ERP, auditoria técnica
+
+Se houver avaliações, analise-as em busca de sinais como: reclamações sobre site, dificuldade de agendamento online, falta de presença digital.
 
 Responda EXATAMENTE neste formato (duas linhas):
 ANÁLISE: [1-2 frases sobre a situação digital do negócio e a oportunidade]

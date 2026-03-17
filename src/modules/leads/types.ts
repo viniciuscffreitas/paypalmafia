@@ -41,6 +41,7 @@ export interface PlaceResult {
   rating: number | null;
   review_count: number;
   category: string | null;
+  reviews: string[];
 }
 
 export interface ScoreResult {

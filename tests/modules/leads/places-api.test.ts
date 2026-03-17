@@ -37,6 +37,7 @@ describe('parsePlacesResponse', () => {
       rating: 4.5,
       review_count: 120,
       category: 'Restaurante',
+      reviews: [],
     });
   });
 
@@ -130,6 +131,35 @@ describe('parsePlacesResponse', () => {
     };
     const results = parsePlacesResponse(apiResponse);
     expect(results).toHaveLength(1);
+  });
+  it('extracts review texts from places response', () => {
+    const apiResponse = {
+      places: [{
+        id: 'rev1',
+        displayName: { text: 'Reviewed Place' },
+        formattedAddress: 'Rua X',
+        businessStatus: 'OPERATIONAL',
+        reviews: [
+          { text: { text: 'Ótimo atendimento' }, rating: 5 },
+          { text: { text: 'Site não funciona' }, rating: 3 },
+        ],
+      }],
+    };
+    const results = parsePlacesResponse(apiResponse);
+    expect(results[0].reviews).toEqual(['Ótimo atendimento', 'Site não funciona']);
+  });
+
+  it('returns empty reviews array when no reviews', () => {
+    const apiResponse = {
+      places: [{
+        id: 'no-rev',
+        displayName: { text: 'No Reviews' },
+        formattedAddress: 'Rua Y',
+        businessStatus: 'OPERATIONAL',
+      }],
+    };
+    const results = parsePlacesResponse(apiResponse);
+    expect(results[0].reviews).toEqual([]);
   });
 });
 

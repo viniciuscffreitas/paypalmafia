@@ -14,6 +14,7 @@ function makeLead(overrides: Partial<PlaceResult> = {}): PlaceResult {
     rating: 4.0,
     review_count: 50,
     category: 'restaurant',
+    reviews: [],
     ...overrides,
   };
 }

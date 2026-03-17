@@ -17,6 +17,7 @@ const FIELD_MASK = [
   'places.googleMapsUri',
   'places.businessStatus',
   'places.photos',
+  'places.reviews',
 ].join(',');
 
 export function parsePlacesResponse(data: any): PlaceResult[] {
@@ -39,6 +40,7 @@ export function parsePlacesResponse(data: any): PlaceResult[] {
     rating: p.rating ?? null,
     review_count: p.userRatingCount ?? 0,
     category: p.primaryTypeDisplayName?.text ?? null,
+    reviews: (p.reviews || []).map((r: any) => r.text?.text).filter(Boolean).slice(0, 5),
     }));
 }
 

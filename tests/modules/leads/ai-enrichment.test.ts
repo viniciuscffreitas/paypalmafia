@@ -15,6 +15,7 @@ describe('buildAnalysisPrompt', () => {
       rating: 4.5,
       review_count: 230,
       category: 'Dentist',
+      reviews: [],
     };
     const score: ScoreResult = {
       total: 6,
@@ -42,6 +43,7 @@ describe('buildAnalysisPrompt', () => {
       rating: 4.0,
       review_count: 80,
       category: 'Bakery',
+      reviews: [],
     };
     const score: ScoreResult = {
       total: 10,
@@ -52,6 +54,18 @@ describe('buildAnalysisPrompt', () => {
     const prompt = buildAnalysisPrompt(place, score);
     expect(prompt).toContain('nenhum');
     expect(prompt).toContain('vibe-web Essential Landing');
+  });
+  it('includes reviews in prompt when available', () => {
+    const place: PlaceResult = {
+      place_id: 'test', name: 'Test', address: null, phone: null,
+      website: null, google_maps_url: null, photo_url: null,
+      rating: 4.0, review_count: 10, category: 'Dentist',
+      reviews: ['Site não funciona', 'Ótimo dentista'],
+    };
+    const score: ScoreResult = { total: 4, signals: ['no_website'], recommended_service: 'vibe-web Essential Landing' };
+    const prompt = buildAnalysisPrompt(place, score);
+    expect(prompt).toContain('Site não funciona');
+    expect(prompt).toContain('Ótimo dentista');
   });
 });
 
