@@ -58,4 +58,55 @@ describe('parsePlacesResponse', () => {
     expect(parsePlacesResponse({ places: [] })).toEqual([]);
     expect(parsePlacesResponse({})).toEqual([]);
   });
+
+  it('filters out places with CLOSED_PERMANENTLY status', () => {
+    const apiResponse = {
+      places: [
+        {
+          id: 'open1',
+          displayName: { text: 'Open Business' },
+          formattedAddress: 'Rua A',
+          businessStatus: 'OPERATIONAL',
+        },
+        {
+          id: 'closed1',
+          displayName: { text: 'Closed Business' },
+          formattedAddress: 'Rua B',
+          businessStatus: 'CLOSED_PERMANENTLY',
+        },
+      ],
+    };
+    const results = parsePlacesResponse(apiResponse);
+    expect(results).toHaveLength(1);
+    expect(results[0].name).toBe('Open Business');
+  });
+
+  it('filters out places with CLOSED_TEMPORARILY status', () => {
+    const apiResponse = {
+      places: [
+        {
+          id: 'temp1',
+          displayName: { text: 'Temp Closed' },
+          formattedAddress: 'Rua C',
+          businessStatus: 'CLOSED_TEMPORARILY',
+        },
+      ],
+    };
+    const results = parsePlacesResponse(apiResponse);
+    expect(results).toHaveLength(0);
+  });
+
+  it('includes places with no businessStatus (defaults to operational)', () => {
+    const apiResponse = {
+      places: [
+        {
+          id: 'no-status',
+          displayName: { text: 'No Status Biz' },
+          formattedAddress: 'Rua D',
+        },
+      ],
+    };
+    const results = parsePlacesResponse(apiResponse);
+    expect(results).toHaveLength(1);
+  });
 });

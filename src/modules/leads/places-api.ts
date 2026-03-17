@@ -15,13 +15,19 @@ const FIELD_MASK = [
   'places.userRatingCount',
   'places.primaryTypeDisplayName',
   'places.googleMapsUri',
+  'places.businessStatus',
 ].join(',');
 
 export function parsePlacesResponse(data: any): PlaceResult[] {
   const places = data?.places;
   if (!Array.isArray(places)) return [];
 
-  return places.map((p: any) => ({
+  return places
+    .filter((p: any) => {
+      const status = p.businessStatus;
+      return !status || status === 'OPERATIONAL';
+    })
+    .map((p: any) => ({
     place_id: p.id,
     name: p.displayName?.text ?? 'Unknown',
     address: p.formattedAddress ?? null,
@@ -31,7 +37,7 @@ export function parsePlacesResponse(data: any): PlaceResult[] {
     rating: p.rating ?? null,
     review_count: p.userRatingCount ?? 0,
     category: p.primaryTypeDisplayName?.text ?? null,
-  }));
+    }));
 }
 
 export async function searchPlaces(
