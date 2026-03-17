@@ -40,40 +40,64 @@ export function parsePlacesResponse(data: any): PlaceResult[] {
     }));
 }
 
+export function parseNextPageToken(data: any): string | null {
+  return data?.nextPageToken ?? null;
+}
+
 export async function searchPlaces(
   apiKey: string,
   query: string,
   region: string,
+  maxPages: number = 3,
 ): Promise<PlaceResult[]> {
-  const body = {
-    textQuery: `${query} em ${region}`,
-    languageCode: 'pt-BR',
-    maxResultCount: 20,
-  };
+  const allResults: PlaceResult[] = [];
+  let pageToken: string | undefined;
 
-  try {
-    const response = await fetch(PLACES_API_BASE, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': FIELD_MASK,
-      },
-      body: JSON.stringify(body),
-    });
+  for (let page = 0; page < maxPages; page++) {
+    const body: Record<string, any> = {
+      textQuery: `${query} em ${region}`,
+      languageCode: 'pt-BR',
+      pageSize: 20,
+    };
 
-    if (!response.ok) {
-      const error = await response.text();
-      logger.error(`Places API error (${response.status}): ${error}`);
-      return [];
+    if (pageToken) {
+      body.pageToken = pageToken;
     }
 
-    const data = await response.json();
-    const results = parsePlacesResponse(data);
-    logger.info(`Found ${results.length} places for "${query}" in "${region}"`);
-    return results;
-  } catch (error) {
-    logger.error('Places API request failed:', error);
-    return [];
+    try {
+      const response = await fetch(PLACES_API_BASE, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': apiKey,
+          'X-Goog-FieldMask': FIELD_MASK,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        logger.error(`Places API error (${response.status}): ${error}`);
+        break;
+      }
+
+      const data = await response.json();
+      const results = parsePlacesResponse(data);
+      allResults.push(...results);
+
+      const nextToken = parseNextPageToken(data);
+      if (!nextToken) break;
+
+      pageToken = nextToken;
+      logger.info(`Page ${page + 1}: ${results.length} places, fetching next page...`);
+
+      await new Promise((r) => setTimeout(r, 300));
+    } catch (error) {
+      logger.error('Places API request failed:', error);
+      break;
+    }
   }
+
+  logger.info(`Found ${allResults.length} total places for "${query}" in "${region}"`);
+  return allResults;
 }

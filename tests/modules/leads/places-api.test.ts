@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePlacesResponse } from '../../../src/modules/leads/places-api';
+import { parsePlacesResponse, parseNextPageToken } from '../../../src/modules/leads/places-api';
 
 describe('parsePlacesResponse', () => {
   it('parses a valid Places API response into PlaceResult[]', () => {
@@ -108,5 +108,17 @@ describe('parsePlacesResponse', () => {
     };
     const results = parsePlacesResponse(apiResponse);
     expect(results).toHaveLength(1);
+  });
+});
+
+describe('parseNextPageToken', () => {
+  it('returns nextPageToken when present', () => {
+    const data = { places: [], nextPageToken: 'abc123' };
+    expect(parseNextPageToken(data)).toBe('abc123');
+  });
+
+  it('returns null when no nextPageToken', () => {
+    const data = { places: [] };
+    expect(parseNextPageToken(data)).toBeNull();
   });
 });
