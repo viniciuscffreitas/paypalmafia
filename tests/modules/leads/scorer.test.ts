@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scoreLead } from '../../../src/modules/leads/scorer';
+import { scoreLead, applyWebsiteCheck } from '../../../src/modules/leads/scorer';
 import type { PlaceResult } from '../../../src/modules/leads/types';
 
 function makeLead(overrides: Partial<PlaceResult> = {}): PlaceResult {
@@ -95,6 +95,22 @@ describe('scoreLead', () => {
   // a lead with score 0 (no negative signals) should not get a service recommendation
   it('recommends "none" for high-volume established business (regression from original bug)', () => {
     const result = scoreLead(makeLead({ review_count: 200, rating: 4.8, website: 'https://ok.com' }));
+    expect(result.recommended_service).toBe('none');
+  });
+});
+
+describe('applyWebsiteCheck', () => {
+  it('adds website signals and adjusts score', () => {
+    const base = { total: 2, signals: ['no_https'], recommended_service: 'vibe-web Brand Authority' };
+    const result = applyWebsiteCheck(base, ['not_responsive'], 1);
+    expect(result.total).toBe(3);
+    expect(result.signals).toContain('no_https');
+    expect(result.signals).toContain('not_responsive');
+  });
+
+  it('returns none if total stays 0', () => {
+    const base = { total: 0, signals: [], recommended_service: 'none' };
+    const result = applyWebsiteCheck(base, [], 0);
     expect(result.recommended_service).toBe('none');
   });
 });

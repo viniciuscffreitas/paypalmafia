@@ -35,3 +35,10 @@ export function scoreLead(lead: PlaceResult): ScoreResult {
 
   return { total, signals, recommended_service };
 }
+
+export function applyWebsiteCheck(base: ScoreResult, websiteSignals: string[], adjustment: number): ScoreResult {
+  const signals = [...base.signals, ...websiteSignals];
+  const total = base.total + adjustment;
+  const recommended_service = total === 0 ? 'none' : base.recommended_service;
+  return { total, signals, recommended_service };
+}
