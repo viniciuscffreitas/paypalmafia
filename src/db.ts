@@ -148,6 +148,19 @@ function runMigrations(db: Database.Database): void {
         ALTER TABLE leads ADD COLUMN photo_url TEXT;
       `,
     },
+    {
+      name: '009_api_usage_log',
+      sql: `
+        CREATE TABLE IF NOT EXISTS api_usage_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          endpoint TEXT NOT NULL,
+          places_count INTEGER DEFAULT 0,
+          pages_fetched INTEGER DEFAULT 1,
+          estimated_cost REAL DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `,
+    },
   ];
 
   const applied = new Set(

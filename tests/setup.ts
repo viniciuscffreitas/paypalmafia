@@ -92,6 +92,15 @@ export function createTestDb(): Database.Database {
       found_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       contacted_at DATETIME
     );
+
+    CREATE TABLE IF NOT EXISTS api_usage_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      endpoint TEXT NOT NULL,
+      places_count INTEGER DEFAULT 0,
+      pages_fetched INTEGER DEFAULT 1,
+      estimated_cost REAL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   return db;

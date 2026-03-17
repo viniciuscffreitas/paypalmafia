@@ -10,6 +10,7 @@ import type { Lead, LeadSearchConfig } from './types';
 import { searchPlaces, getPhotoUrl } from './places-api';
 import { scoreLead } from './scorer';
 import { enrichLead } from './ai-enrichment';
+import { logApiUsage, getCostEntries, formatCostSummary } from './cost-tracker';
 
 let ctx: ModuleContext;
 
@@ -115,6 +116,8 @@ async function runProspecting(): Promise<void> {
       cfg.region,
     );
 
+    logApiUsage(ctx.db, 'textSearch', places.length, Math.ceil(places.length / 20));
+
     for (const place of places) {
       const existing = ctx.db
         .prepare('SELECT id FROM leads WHERE place_id = ?')
@@ -204,6 +207,12 @@ const leadsCommand = new SlashCommandBuilder()
     sub.setName('stats').setDescription('Show lead statistics')
   )
   .addSubcommand((sub) =>
+    sub.setName('cost').setDescription('Show estimated API cost')
+      .addIntegerOption((opt) =>
+        opt.setName('days').setDescription('Number of days to show (default: 30)')
+      )
+  )
+  .addSubcommand((sub) =>
     sub
       .setName('status')
       .setDescription('Update a lead status')
@@ -257,6 +266,8 @@ export const leadsModule: BotModule = {
       else if (sub === 'remove') await handleConfigRemove(interaction);
     } else if (sub === 'stats') {
       await handleStats(interaction);
+    } else if (sub === 'cost') {
+      await handleCost(interaction);
     } else if (sub === 'status') {
       await handleStatusUpdate(interaction);
     }
@@ -275,6 +286,8 @@ async function handleSearch(interaction: ChatInputCommandInteraction): Promise<v
   await interaction.deferReply();
 
   const places = await searchPlaces(process.env['GOOGLE_PLACES_API_KEY'], query, region);
+
+  logApiUsage(ctx.db, 'textSearch', places.length, Math.ceil(places.length / 20));
 
   if (places.length === 0) {
     await interaction.editReply('Nenhum resultado encontrado.');
@@ -391,6 +404,29 @@ async function handleConfigRemove(interaction: ChatInputCommandInteraction): Pro
   }
 
   await interaction.reply(`🗑️ Config #${id} removida.`);
+}
+
+async function handleCost(interaction: ChatInputCommandInteraction): Promise<void> {
+  const days = interaction.options.getInteger('days') ?? 30;
+
+  const entries = getCostEntries(ctx.db, days);
+  const summary = formatCostSummary(entries);
+
+  const todayEntries = entries.filter(e =>
+    new Date(e.created_at).toDateString() === new Date().toDateString()
+  );
+  const todaySummary = formatCostSummary(todayEntries);
+
+  const embed = new EmbedBuilder()
+    .setTitle('💰 API Cost Estimate')
+    .setColor(0x5865f2)
+    .addFields(
+      { name: `Últimos ${days} dias`, value: `$${summary.total_cost.toFixed(2)} (${summary.total_places} places, ${summary.total_requests} buscas)`, inline: false },
+      { name: 'Hoje', value: `$${todaySummary.total_cost.toFixed(2)} (${todaySummary.total_places} places, ${todaySummary.total_requests} buscas)`, inline: false },
+    )
+    .setFooter({ text: 'Estimativa baseada em $0.035/place (Pro SKU)' });
+
+  await interaction.reply({ embeds: [embed] });
 }
 
 async function handleStats(interaction: ChatInputCommandInteraction): Promise<void> {
