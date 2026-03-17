@@ -9,7 +9,7 @@ import { searchPlaces } from './places-api';
 import { scoreLead, scoreLeadFromDb, applyWebsiteCheck } from './scorer';
 import { enrichLead } from './ai-enrichment';
 import { logApiUsage } from './cost-tracker';
-import { checkWebsite } from './website-checker';
+import { checkWebsite, analyzeWebsiteUrl } from './website-checker';
 import {
   setHandlerContext,
   buildLeadEmbed,
@@ -69,11 +69,21 @@ async function runProspecting(): Promise<void> {
 
       let score = scoreLead(place);
 
-      if (place.website && score.total > 0) {
-        const websiteCheck = await checkWebsite(place.website);
-        if (websiteCheck.signals.length > 0) {
-          ctx.logger.info(`Website check for ${place.name}: ${websiteCheck.signals.join(', ')} (+${websiteCheck.score_adjustment})`);
-          score = applyWebsiteCheck(score, websiteCheck.signals, websiteCheck.score_adjustment);
+      if (place.website) {
+        const urlCheck = analyzeWebsiteUrl(place.website);
+        if (urlCheck.signals.length > 0) {
+          ctx.logger.info(`URL check for ${place.name}: ${urlCheck.signals.join(', ')} (+${urlCheck.score_adjustment})`);
+          score = applyWebsiteCheck(score, urlCheck.signals, urlCheck.score_adjustment);
+        }
+
+        if (score.total > 0) {
+          const httpCheck = await checkWebsite(place.website);
+          const newSignals = httpCheck.signals.filter(s => !urlCheck.signals.includes(s));
+          if (newSignals.length > 0) {
+            const newAdjustment = httpCheck.score_adjustment - urlCheck.score_adjustment;
+            ctx.logger.info(`HTTP check for ${place.name}: ${newSignals.join(', ')} (+${newAdjustment})`);
+            score = applyWebsiteCheck(score, newSignals, newAdjustment > 0 ? newAdjustment : 0);
+          }
         }
       }
 

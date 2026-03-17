@@ -10,7 +10,7 @@ import { searchPlaces, getPhotoUrl, searchNearby } from './places-api';
 import { scoreLead, applyWebsiteCheck } from './scorer';
 import { enrichLead } from './ai-enrichment';
 import { logApiUsage, getCostEntries, formatCostSummary } from './cost-tracker';
-import { checkWebsite } from './website-checker';
+import { checkWebsite, analyzeWebsiteUrl } from './website-checker';
 import { createLogger } from '../../core/logger';
 
 const logger = createLogger('leads:handlers');
@@ -128,12 +128,24 @@ export async function handleSearch(interaction: ChatInputCommandInteraction): Pr
 
     let score = scoreLead(place);
 
-    // Website check for leads that have a website and some score signals
-    if (place.website && score.total > 0) {
-      const websiteCheck = await checkWebsite(place.website);
-      if (websiteCheck.signals.length > 0) {
-        logger.info(`Website check for ${place.name}: ${websiteCheck.signals.join(', ')} (+${websiteCheck.score_adjustment})`);
-        score = applyWebsiteCheck(score, websiteCheck.signals, websiteCheck.score_adjustment);
+    // URL analysis (sync) runs on ALL leads with website — catches social media, HTTP
+    if (place.website) {
+      const urlCheck = analyzeWebsiteUrl(place.website);
+      if (urlCheck.signals.length > 0) {
+        logger.info(`URL check for ${place.name}: ${urlCheck.signals.join(', ')} (+${urlCheck.score_adjustment})`);
+        score = applyWebsiteCheck(score, urlCheck.signals, urlCheck.score_adjustment);
+      }
+
+      // Full HTTP check (async) only for leads already showing signals — don't waste time on healthy sites
+      if (score.total > 0) {
+        const httpCheck = await checkWebsite(place.website);
+        // Only apply NEW signals not already caught by URL analysis
+        const newSignals = httpCheck.signals.filter(s => !urlCheck.signals.includes(s));
+        if (newSignals.length > 0) {
+          const newAdjustment = httpCheck.score_adjustment - urlCheck.score_adjustment;
+          logger.info(`HTTP check for ${place.name}: ${newSignals.join(', ')} (+${newAdjustment})`);
+          score = applyWebsiteCheck(score, newSignals, newAdjustment > 0 ? newAdjustment : 0);
+        }
       }
     }
 
