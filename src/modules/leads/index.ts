@@ -35,12 +35,16 @@ export interface LeadEmbedData {
 export function buildLeadEmbedData(lead: Lead): LeadEmbedData {
   const color = lead.score >= 10 ? 0xff6b6b : lead.score >= 7 ? 0xf2c94c : 0x5865f2;
 
+  const mapsUrl = lead.google_maps_url || `https://www.google.com/maps/place/?q=place_id:${lead.place_id}`;
+
   const lines: string[] = [];
+  if (lead.category) lines.push(`🏷️ ${lead.category}`);
   if (lead.address) lines.push(`📍 ${lead.address}`);
   if (lead.rating !== null) lines.push(`⭐ ${lead.rating} (${lead.review_count} avaliações)`);
-  if (lead.website) lines.push(`🌐 ${lead.website}`);
-  else lines.push('🌐 Sem website');
+  if (lead.website) lines.push(`🌐 [Website](${lead.website})`);
+  else lines.push('🌐 **Sem website**');
   if (lead.phone) lines.push(`📞 ${lead.phone}`);
+  lines.push(`🗺️ [Ver no Google Maps](${mapsUrl})`);
   lines.push(`\n🎯 Score: **${lead.score}** | Serviço: **${lead.recommended_service}**`);
 
   const fields: { name: string; value: string }[] = [];
@@ -112,11 +116,11 @@ async function runProspecting(): Promise<void> {
       const score = scoreLead(place);
 
       const result = ctx.db.prepare(`
-        INSERT INTO leads (place_id, name, address, phone, website, rating, review_count, category, region, score, recommended_service)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO leads (place_id, name, address, phone, website, google_maps_url, rating, review_count, category, region, score, recommended_service)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         place.place_id, place.name, place.address, place.phone, place.website,
-        place.rating, place.review_count, place.category, cfg.region,
+        place.google_maps_url, place.rating, place.review_count, place.category, cfg.region,
         score.total, score.recommended_service,
       );
 
@@ -284,11 +288,11 @@ async function handleSearch(interaction: ChatInputCommandInteraction): Promise<v
     const score = scoreLead(place);
 
     const result = ctx.db.prepare(`
-      INSERT INTO leads (place_id, name, address, phone, website, rating, review_count, category, region, score, recommended_service)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO leads (place_id, name, address, phone, website, google_maps_url, rating, review_count, category, region, score, recommended_service)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       place.place_id, place.name, place.address, place.phone, place.website,
-      place.rating, place.review_count, place.category, region,
+      place.google_maps_url, place.rating, place.review_count, place.category, region,
       score.total, score.recommended_service,
     );
 

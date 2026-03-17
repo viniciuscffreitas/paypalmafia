@@ -18,6 +18,7 @@ export interface Lead {
   rating: number | null;
   review_count: number;
   category: string | null;
+  google_maps_url: string | null;
   region: string;
   score: number;
   recommended_service: string | null;
@@ -34,6 +35,7 @@ export interface PlaceResult {
   address: string | null;
   phone: string | null;
   website: string | null;
+  google_maps_url: string | null;
   rating: number | null;
   review_count: number;
   category: string | null;

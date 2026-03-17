@@ -136,6 +136,12 @@ function runMigrations(db: Database.Database): void {
         );
       `,
     },
+    {
+      name: '007_leads_google_maps_url',
+      sql: `
+        ALTER TABLE leads ADD COLUMN google_maps_url TEXT;
+      `,
+    },
   ];
 
   const applied = new Set(

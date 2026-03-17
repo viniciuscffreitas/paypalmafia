@@ -14,6 +14,7 @@ const FIELD_MASK = [
   'places.rating',
   'places.userRatingCount',
   'places.primaryTypeDisplayName',
+  'places.googleMapsUri',
 ].join(',');
 
 export function parsePlacesResponse(data: any): PlaceResult[] {
@@ -26,6 +27,7 @@ export function parsePlacesResponse(data: any): PlaceResult[] {
     address: p.formattedAddress ?? null,
     phone: p.nationalPhoneNumber ?? null,
     website: p.websiteUri ?? null,
+    google_maps_url: p.googleMapsUri ?? null,
     rating: p.rating ?? null,
     review_count: p.userRatingCount ?? 0,
     category: p.primaryTypeDisplayName?.text ?? null,

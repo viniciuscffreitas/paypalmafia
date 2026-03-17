@@ -14,6 +14,7 @@ describe('parsePlacesResponse', () => {
           rating: 4.5,
           userRatingCount: 120,
           primaryTypeDisplayName: { text: 'Restaurante' },
+          googleMapsUri: 'https://maps.google.com/?cid=123456',
         },
       ],
     };
@@ -26,6 +27,7 @@ describe('parsePlacesResponse', () => {
       address: 'Rua A, 100, São Paulo',
       phone: '(11) 3000-0000',
       website: 'https://restaurantebom.com.br',
+      google_maps_url: 'https://maps.google.com/?cid=123456',
       rating: 4.5,
       review_count: 120,
       category: 'Restaurante',
@@ -49,6 +51,7 @@ describe('parsePlacesResponse', () => {
     expect(results[0].rating).toBeNull();
     expect(results[0].review_count).toBe(0);
     expect(results[0].category).toBeNull();
+    expect(results[0].google_maps_url).toBeNull();
   });
 
   it('returns empty array for empty response', () => {

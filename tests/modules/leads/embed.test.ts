@@ -13,6 +13,7 @@ function makeLead(overrides: Partial<Lead> = {}): Lead {
     rating: 4.0,
     review_count: 50,
     category: 'restaurant',
+    google_maps_url: 'https://maps.google.com/?cid=123',
     region: 'São Paulo',
     score: 6,
     recommended_service: 'vibe-web Brand Authority',
